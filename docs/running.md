@@ -42,7 +42,8 @@ nothing: a phone (or the harness) must scan it over `/nfc` first, which enables 
 real Libre 2.
 
 Useful flags: `-age 0` (the default) leaves the sensor in its applicator (scan it or `POST /activate`); `-warmup 5m` shortens
-the warmup; `-age 359h58m` gives a sensor 2 minutes before the end of its 15 days; `-strict-unlock` refuses a replayed unlock
+the warmup of a new sensor (60 minutes by default; "End warmup now" on the Sensor page or `POST /end-warmup` cuts a running
+one short); `-age 359h58m` gives a sensor 2 minutes before the end of its 15 days; `-strict-unlock` refuses a replayed unlock
 count. `-state` is where the sensor is saved; without `-fresh` libre2sim resumes it.
 
 ## 2. With LibreTransmitter's real code, without Loop

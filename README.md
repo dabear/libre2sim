@@ -119,6 +119,7 @@ curl -s -XPOST localhost:8081/out-of-range -d '{"minutes":20}'  # unreachable fo
 curl -s -XPOST localhost:8081/terminate                         # the sensor ends now
 curl -s -XPOST localhost:8081/fault -d '{"kind":"badcrc"}'      # spoil the next packet: badcrc, short or none
 curl -s -XPOST localhost:8081/activate                          # start a sensor still in its applicator
+curl -s -XPOST localhost:8081/end-warmup                        # skip the rest of the warmup
 curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinutes":0}'
 ```
 
@@ -132,6 +133,7 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | `GET /status` | UID, serial, patch info, BLE address and advertised name, `calibration` (`i1`…`i6`, as LibreTransmitter's `CalibrationInfo`), `temperature` (`raw`, `adjustment`, `celsius`: the fixed values every measurement record carries; per measurement in LibreTransmitter, not calibration), FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed. Also `strictUnlock`, `unlocksAccepted`/`unlocksRefused` (since launch), `nextReading` (`{minute, mgdl, warmup, estimate, noiseSD, at, atMs, inSeconds}`) and `trend` (`delta1`, `delta5`, `delta15`: mg/dL against that many minutes earlier) |
 | `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`; applies from the next minute. 400 on another kind |
 | `POST /activate` | start a sensor still in its applicator (the Abbott app's job on a real one; LibreTransmitter cannot). 409 if already started |
+| `POST /end-warmup` | end the warmup early: the next minute is the first with a reading (the panel's "End warmup now"). 409 unless the sensor is in warmup |
 | `POST /disconnect` | the sensor drops the link and the app reconnects. 409 if no phone is connected |
 | `POST /out-of-range` | `{"minutes":n}`: drop the link and stay unreachable that long. 400 unless `minutes` > 0 |
 | `POST /terminate` | end the sensor now: FRAM state `05`, no more packets, the link drops |

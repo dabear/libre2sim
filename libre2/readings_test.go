@@ -113,3 +113,39 @@ func TestTrendAndHistory(t *testing.T) {
 		t.Errorf("young sensor: %d values from minute %d", len(h.Values), h.FirstMinute)
 	}
 }
+
+func TestEndWarmup(t *testing.T) {
+	s, now := readingsSensor(t, 10*time.Minute+30*time.Second, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
+	if f := s.state.framState(now); f != framWarmup {
+		t.Fatalf("framState %d, want warmup", f)
+	}
+	if err := s.EndWarmup(now); err != nil {
+		t.Fatal(err)
+	}
+	// Minute 10 stays without a reading; minute 11 is the first.
+	if n := nextOf(t, s, now); n == nil || n.Minute != 11 || n.Warmup || n.MgDl != 100 {
+		t.Fatalf("next after ending warmup: %+v", n)
+	}
+	later := now.Add(time.Minute)
+	if g := s.Status(); s.Tick(later) != 11 || s.Reading(10) != 0 || s.Reading(11) != 100 || s.state.framState(later) != framReady {
+		t.Fatalf("a minute later: readings %d, %d, framState %d (%v)", s.Reading(10), s.Reading(11), s.state.framState(later), g["framState"])
+	}
+	if s.EndWarmup(now) == nil || s.EndWarmup(later) == nil {
+		t.Error("ended warmup twice")
+	}
+
+	ended := false
+	for _, e := range func() []Event { ev, _ := s.Events().Since(0); return ev }() {
+		ended = ended || e.Kind == "warmup-ended"
+	}
+	if !ended {
+		t.Error("no warmup-ended event")
+	}
+
+	if s, now := readingsSensor(t, 0, time.Hour, GlucoseMode{Kind: "sine", Value: 120}); s.EndWarmup(now) == nil {
+		t.Error("ended the warmup of a sensor in its applicator")
+	}
+	if s, now := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "sine", Value: 120}); s.EndWarmup(now) == nil {
+		t.Error("ended the warmup of a ready sensor")
+	}
+}

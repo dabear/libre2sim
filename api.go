@@ -37,6 +37,7 @@ import (
 //	                             how readings are made up from the next minute on;
 //	                             400 on any other kind
 //	POST /activate               start a sensor that is still in its applicator
+//	POST /end-warmup             end the warmup at the next minute; 409 unless in warmup
 //	                             (LibreTransmitter cannot); 409 if already started
 //	POST /disconnect             the sensor drops the link; the app reconnects;
 //	                             409 if no phone is connected
@@ -158,6 +159,14 @@ func newAPI(sensor *libre2.Sensor) *api {
 			return
 		}
 		log.Printf("activated")
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/end-warmup", func(w http.ResponseWriter, r *http.Request) {
+		if err := sensor.EndWarmup(time.Now()); err != nil {
+			writeError(w, http.StatusConflict, err.Error(), 0)
+			return
+		}
+		log.Printf("warmup ended early")
 		writeJSON(w, sensor.Status())
 	})
 	a.post("/disconnect", func(w http.ResponseWriter, r *http.Request) {

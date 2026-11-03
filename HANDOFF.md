@@ -190,6 +190,11 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     `rawTemperature`/`rawTemperatureAdjustment` are per-`Measurement`. The sim's `Calibration` struct keeps them (the inverse
     needs them; saved state JSON unchanged), but `/status` and `/config` now show `calibration` = i1…i6 and a separate
     `temperature` {raw, adjustment, celsius 31.6}. New `Sensor.Calibration()` accessor; impossible_test uses it.
+28. **End warmup (`POST /end-warmup`, panel "End warmup now"):** sets WarmupMinutes = lc+1 (first reading next minute; earlier
+    minutes stay empty). 409 when not running, not in warmup, or already ending next minute. Live (cbharness): during warmup
+    LibreTransmitter gets packets with empty trend/history; after ending at minute 12, a reconnect decoded 13…20 = 110 mg/dL.
+    Gotchas: a shell `wait` after starting libre2sim with `&` waits on libre2sim forever; a `/new` re-exec'd libre2sim has no
+    `-fresh` in its args, so `pkill -f "libre2sim -fresh"` misses it (kill by port: `lsof -iTCP:8081`).
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 

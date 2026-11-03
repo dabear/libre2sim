@@ -85,6 +85,7 @@ input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px 
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.danger { color: var(--warn); }
+.btn:disabled { opacity: .45; cursor: default; background: var(--card); }
 .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .toggle { display: flex; gap: 10px; align-items: center; cursor: pointer; }
 .toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -190,6 +191,7 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
       <p class="note">One-shot: only the next packet is spoiled. LibreTransmitter parses only at exactly 46 bytes, so a short packet leaves its buffer stale until it reconnects.</p></div>
     <div class="card"><h2>Sensor life</h2>
       <div class="row"><button class="btn" onclick="post('/activate')">Activate</button>
+        <button class="btn" id="endWarmup" onclick="post('/end-warmup')">End warmup now</button>
         <button class="btn danger" onclick="if (confirm('End the sensor now?')) post('/terminate')">Terminate</button></div>
       <div class="row"><label class="field">wear days <input id="wearDays" type="number" value="15"></label>
         <label class="field">warmup (min) <input id="warmup" type="number" value="60"></label>
@@ -363,6 +365,7 @@ function showStatus(s) {
   el('statWear').textContent = !s.activated ? 'in its applicator' : s.terminated ? 'terminated'
     : lc < s.warmupMinutes ? 'warmup: ' + duration(s.warmupMinutes - lc) + ' left'
     : lc >= s.wearMinutes ? 'worn out' : duration(s.wearMinutes - lc) + ' of wear left';
+  el('endWarmup').disabled = !(s.activated && !s.terminated && lc < s.warmupMinutes && lc < s.wearMinutes);
   el('statPhone').textContent = s.connected ? 'Connected' : 'Not connected';
   el('statAdv').textContent = s.advertising ? 'advertising' : s.streamingEnabled ? 'not advertising' : 'scan it to enable streaming';
   el('statUnlocks').textContent = s.unlocksAccepted !== undefined ? s.unlocksAccepted : '—';

@@ -113,6 +113,28 @@ func (s *Sensor) Activate(now time.Time) error {
 	return nil
 }
 
+// EndWarmup cuts the warmup short: the next minute is the first with a
+// reading, and minutes already made up stay without one, as a glucose mode
+// change applies only from the next minute. A real sensor cannot do this.
+func (s *Sensor) EndWarmup(now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.state.running(now) {
+		return errors.New("the sensor is not running")
+	}
+	lc := s.state.lifeCount(now)
+	if lc >= s.state.WarmupMinutes {
+		return errors.New("the sensor is not in warmup")
+	}
+	if lc+1 == s.state.WarmupMinutes {
+		return errors.New("the warmup already ends at the next minute")
+	}
+	s.state.WarmupMinutes = lc + 1
+	s.changed()
+	s.events.Add(CatSensor, "warmup-ended", "warmup ended early: the first reading is minute %d", lc+1)
+	return nil
+}
+
 // Terminate ends the sensor now: its FRAM says shut down and it no longer
 // enables streaming.
 func (s *Sensor) Terminate(now time.Time) {

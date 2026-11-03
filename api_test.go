@@ -589,3 +589,16 @@ func TestConfigOverHTTP(t *testing.T) {
 		t.Errorf("events %+v", ev.Events)
 	}
 }
+
+func TestEndWarmupOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 10*time.Minute)
+	if s, r := call(t, srv, "POST", "/end-warmup", ""); s != http.StatusOK || r["framState"] == nil {
+		t.Fatalf("in warmup: HTTP %d %v", s, r)
+	}
+	if s, _ := call(t, srv, "POST", "/end-warmup", ""); s != http.StatusConflict {
+		t.Errorf("again: HTTP %d, want 409", s)
+	}
+	if s, _ := call(t, srv, "GET", "/end-warmup", ""); s != http.StatusMethodNotAllowed {
+		t.Errorf("GET: HTTP %d, want 405", s)
+	}
+}
