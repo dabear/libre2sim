@@ -50,6 +50,9 @@ for records 1 to 6, it parses its receive buffer only at exactly 46 bytes, and i
 
 ## Run it with LibreTransmitter in Loop
 
+Step-by-step notes for all three ways to run it (on its own, with LibreTransmitter's real code via cbharness, and in
+Loop), with troubleshooting, are in [docs/running.md](docs/running.md).
+
 The Simulator has no NFC. LibreTransmitter's pairing therefore needs a small patch for the Simulator build: it
 talks to libre2sim's `/nfc` endpoint in place of CoreNFC, and device builds are unchanged.
 

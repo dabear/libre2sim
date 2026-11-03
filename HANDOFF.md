@@ -12,7 +12,7 @@
 >    orchestrator verifies the work, commits it, then updates this file.
 > 5. Don't post anything outside this machine (GitHub issues/PRs, pushes) without the user's explicit OK.
 
-**Last updated:** 2026-11-03 (session 2, start). **State:** M0–M6 are done, verified and committed. **Session 2 task
+**Last updated:** 2026-11-03 (session 2). **State:** M0–M6 are done, verified and committed. **Session 2 task
 (user: "finish implementation and notes on how to run it"):** run scenarios 3, 4, 5, 7 with cbharness (open decision 2,
 now approved by that request), fix what they find, and write step-by-step run notes (`docs/running.md`). Full Loop
 build (decision 1) and upstream posts (3) are still not approved.
@@ -43,6 +43,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | `libre3sim.reference.md` | How libre3sim works (the model for this project) |
 | `libre2-plan.md` | What LibreTransmitter expects from a Libre 2 (protocol notes) |
 | `libre2-implementation-plan.md` | Milestones M0–M6: files, signatures, tests, "done when" |
+| `docs/running.md` | Step-by-step run notes (standalone, cbharness, Loop) and troubleshooting (session 2) |
 | `docs/scenarios.md` | 8 manual scenarios with curl commands and expected results; verification marks per scenario |
 | `docs/libre3sim-transport-fixes.md` | Two transport bugs found in libre3sim, with diffs (for upstreaming) |
 | `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | The LibreTransmitter patch (against `4110512`); minimal 3-file version since session 2 (finding 23) |
@@ -202,7 +203,7 @@ marks in `docs/scenarios.md` when you run them.
 
 1. **Full Loop build in the Simulator** (clone LoopWorkspace, apply the patch to its LibreTransmitter, build, launch with
    the dylib injected). Large clone and long build. **Ask before starting.**
-2. **Run scenarios 3, 4, 5 and 7 with cbharness.** Offered as cheap; not yet approved or started.
+2. ~~Run scenarios 3, 4, 5 and 7 with cbharness.~~ Done in session 2.
 3. **Upstream posts:** the LibreTransmitter PR (`integration/LibreTransmitter/PR.md` + patch); a LibreTransmitter issue
    for finding 16 (short-packet stall, silent CRC drop) and finding 7 (trend timestamps); the libre3sim transport fixes.
    **Nothing may be posted without the user's OK.**
@@ -256,4 +257,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
-| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. Scenarios 4, 3 pass; found+fixed ImpossiBLE owner bug (0008). Scenario 5 passes. User asked mid-session: (a) a better control panel (current/next reading, NFC/event log, config): **delegated to a Sonnet subagent** (web.go/api.go/libre2, README API section; told not to touch tools/integration/simulator/docs/scenarios.md); (b) 'what would it take to pair with LibreTransmitter, change as little as possible': plan is to shrink the patch to 3 files (no refactor/new file/pbxproj). | in progress: scenario 7, patch shrink, UI subagent running |
+| 2026-11-03 | 2 | Scenarios 3, 4, 5, 7 verified with cbharness (all non-Loop scenarios now pass); found+fixed an ImpossiBLE bug (patch 0008, finding 19); shrank the LibreTransmitter patch to 3 files (finding 23); control panel v2 via Sonnet subagent, verified (finding 24); `tools/devicecheck` shows device builds unchanged (finding 25); wrote `docs/running.md`. Mid-session the user also pasted a generic 'admin panel' prompt; asked them what it is for. | Open: Loop build, upstream posts, publishing (§8 1, 3, 4); admin-panel request awaiting clarification. |
