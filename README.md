@@ -62,6 +62,8 @@ Everything it does is also an HTTP call (see [Control API](#control-api); it lis
 3. **Run Loop on an iPhone Simulator.** In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
    goes to libre2sim, the app finds the sensor over (simulated) Bluetooth, and a reading arrives each minute.
 
+   <img src="docs/images/loop-sensor.png" width="300" alt="Loop in the iOS Simulator, paired with libre2sim's sensor: operational, with its last measurement">
+
 [docs/running.md](docs/running.md) has the details and a troubleshooting table; [docs/scenarios.md](docs/scenarios.md)
 has scenarios to try (out of range, low glucose, end of wear, faults, a new sensor).
 
