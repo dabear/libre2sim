@@ -17,7 +17,7 @@ app in the iOS Simulator through [ImpossiBLE](https://github.com/mickeyl/Impossi
 You need a Mac with Xcode and [Go](https://go.dev/dl/) 1.20 or later (`brew install go`).
 
 ```bash
-git clone https://github.com/OWNER/libre2sim && cd libre2sim
+git clone https://github.com/dabear/libre2sim && cd libre2sim
 ./start.sh
 ```
 
@@ -207,8 +207,7 @@ Every check below runs LibreTransmitter's own Swift, not a re-implementation of 
   real `Libre2DirectTransmitter` plugin through pairing, scan, connect, unlock and streaming.
 
 `GO111MODULE=on go test -race ./...` runs the Go tests. [docs/scenarios.md](docs/scenarios.md) lists the manual scenarios for
-Loop and which ones have been run. The design is in [libre2-plan.md](libre2-plan.md) (what LibreTransmitter expects) and
-[libre2-implementation-plan.md](libre2-implementation-plan.md); the pull request for the LibreTransmitter patch is drafted in
+Loop and which ones have been run. The pull request for the LibreTransmitter patch is drafted in
 [integration/LibreTransmitter/PR.md](integration/LibreTransmitter/PR.md).
 
 ## Credits and license

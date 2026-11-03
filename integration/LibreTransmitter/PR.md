@@ -3,7 +3,7 @@
 ## What
 
 Libre 2 pairing in the iOS Simulator, against libre2sim, an emulator of a Libre 2 sensor for
-development. Made against `next-dev` (it also applies to `main`). Everything new is in two new files; the edits to existing
+development ([github.com/dabear/libre2sim](https://github.com/dabear/libre2sim)). Made against `next-dev` (it also applies to `main`). Everything new is in two new files; the edits to existing
 files are small and inert on a device:
 
 - **New:** `LibreSensor/SensorPairing/SimulatedSensorPairingService.swift`, entirely inside `#if targetEnvironment(simulator)`.
@@ -44,7 +44,7 @@ repeatable, and lets a change to this code be tested without a sensor.
 - The sources typecheck for both the Simulator and device targets, and a device build cannot see `SimulatedSensorPairingService`.
 - A device build compiles to the same code: resolving `#if targetEnvironment(simulator)` leaves only the `fileprivate` change, and
   the pairing code compiled for arm64 iOS (`-O`, whole module) with and without this patch differs only in `__swift_modhash`, the
-  16-byte hash of the source text. Machine code, data and symbols are identical. (libre2sim's `tools/devicecheck`.)
+  16-byte hash of the source text. Machine code, data and symbols are identical. (libre2sim's `tools/devicecheck`, https://github.com/dabear/libre2sim.)
 
 ## How it was tested
 

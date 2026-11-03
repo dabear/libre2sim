@@ -1,4 +1,4 @@
-From fc071969e0f4bf81d90a440feac8c4105a31227c Mon Sep 17 00:00:00 2001
+From cb036f9b1f94fe87ea27d4977a6abb80472273fc Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <b.inge@nightscoutfoundation.org>
 Date: Tue, 3 Nov 2026 11:31:14 +0100
 Subject: [PATCH] Pair with libre2sim in the iOS Simulator
@@ -332,7 +332,7 @@ index cdf4303..a54b117 100644
                          LocalizedString("Your sensor must be activated and fully warmed up.", comment: "Label text for step 1 of libre2 setup"),
 diff --git a/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift b/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift
 new file mode 100644
-index 0000000..6a39585
+index 0000000..5c5e3d9
 --- /dev/null
 +++ b/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift
 @@ -0,0 +1,119 @@
@@ -379,7 +379,7 @@ index 0000000..6a39585
 +                .fixedSize(horizontal: false, vertical: true)
 +
 +            step(1, done: reachable,
-+                 "Start libre2sim on this Mac: run ./start.sh in the libre2sim folder.",
++                 "Start libre2sim on this Mac (github.com/dabear/libre2sim): run ./start.sh in its folder.",
 +                 detail: reachable == false ? "Not running at \(url.absoluteString)." : sensor)
 +            step(2, done: bluetoothLoaded,
 +                 "Run this app with the ImpossiBLE library: copy the three environment variables start.sh prints into the scheme (Run, Arguments, Environment Variables), then run again.",
