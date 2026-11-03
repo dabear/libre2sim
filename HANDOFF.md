@@ -12,9 +12,10 @@
 >    orchestrator verifies the work, commits it, then updates this file.
 > 5. Don't post anything outside this machine (GitHub issues/PRs, pushes) without the user's explicit OK.
 
-**Last updated:** 2026-11-03 (end of session 1). **State:** M0–M6 are done, verified and committed. The work
-was **stopped by the user** at this point. Nothing is in progress, and the working tree is clean at `15b515b`
-(plus this handoff commit). The next steps are open decisions for the user; see "Open decisions".
+**Last updated:** 2026-11-03 (session 2, start). **State:** M0–M6 are done, verified and committed. **Session 2 task
+(user: "finish implementation and notes on how to run it"):** run scenarios 3, 4, 5, 7 with cbharness (open decision 2,
+now approved by that request), fix what they find, and write step-by-step run notes (`docs/running.md`). Full Loop
+build (decision 1) and upstream posts (3) are still not approved.
 
 ---
 
@@ -220,3 +221,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
+| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. | in progress |
