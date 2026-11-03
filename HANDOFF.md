@@ -3,7 +3,7 @@
 Read this first if you are resuming the work. It records where things stand, what has been verified,
 and how to continue. Keep it updated after every milestone.
 
-**Last updated:** 2026-11-03, during M2.
+**Last updated:** 2026-11-03, M2 verified and committed; M4 next.
 
 ## Documents
 
@@ -51,8 +51,8 @@ session should re-clone them (shallow is fine) into its own scratchpad.
 |---|---|---|---|
 | M0 | Scaffold: module, `libre2/link.go`, `suspend/`, `simulator/` (ImpossiBLE build + patches), `ref/libre3sim/` | ✅ done, verified | `aa09a72` |
 | M1 | Crypto + CRC port (`libre2/crypto.go crc.go fram.go packet.go unlock.go`) + Swift golden vectors (`tools/swiftvectors`, `testdata/swift_vectors.json`) | ✅ done, verified | `be5ec61` |
-| M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, statically verified (not yet run against a live server) | `0b3be5d` |
-| M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | 🔄 in progress (subagent, Opus). First attempt was stopped by the user before it wrote anything; restarted with the same brief | — |
+| M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, verified live through the pair harness | `0b3be5d` |
+| M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | ✅ done, verified live (see finding 8) | `f3a79e7` |
 | M4 | BLE: adapt `ref/libre3sim/impossible.go.txt` (service FDE3, F001 write, F002 notify, advert name = MAC), handler (unlock check → 46-byte packet each minute as 20+20+6), packet builder | ⏳ todo | — |
 | M5 | Control API + faults (`/terminate`, `/out-of-range`, `/disconnect`, `/fault`), scenario checklist in Loop | ⏳ todo | — |
 | M6 | README, credits, LibreTransmitter PR text | ⏳ todo | — |
@@ -79,26 +79,37 @@ session should re-clone them (shallow is fine) into its own scratchpad.
    (wrong for records 1–6); the receive buffer is only parsed at exactly 46 bytes; the README says
    `GetGlucoseFromRaw.swift` is missing, but it's in the repo.
 
+8. **M2 verified live:** LibreTransmitter's real `SimulatedSensorPairingService` (pair harness, iPhone 16
+   simulator) paired with `libre2sim -fresh -age 3h`: `RESULT: paired`, FRAM CRCs valid, state ready,
+   minutesSinceStart 180, maxMinutesWearTime 21600, MAC == advertisedName, serial and calibration ==
+   `/status`, and the FRAM trend decodes **through LibreTransmitter's own GlucoseFromRaw** to exactly the
+   modelled value (80 mg/dL = default sine at minute 180). So `rawForGlucose` is proven against the
+   real client.
+9. **The sim's calibration:** Example2's FRAM gives i1=0, i2=898, i3=24, i4=6819, i5=8904, i6=6192.
+   Temperatures come from BLEExample record 0 (rawTemp 6336, adj +8, ≈31.6 °C). For g = 40…400 mg/dL,
+   raw runs 624…4670, strictly increasing.
+10. **M2 sim's choices** (also commented in the code): patchInfo `C6 09 31 01 rr rr`; FRAM state 01/02/03,
+    and 05 for both expired and terminated, with minutes frozen; trend slot (m−1) mod 16 with body[2] = lc mod 16;
+    history slot for minute 15j at (j−1) mod 32 with body[3] = ((lc−3)/15) mod 32; one FRAM image per scan,
+    cached for 30 s; NFC errors 0x10 (block out of range), 0x01 (unknown), 0x02 (bad d, checked first),
+    0xB0 (not activated/ended; warmup allowed); re-enabling streaming resets UnlockCount; changing the
+    glucose mode only affects future minutes (as in libre3sim).
+
 ## Independent check harness (orchestrator-owned)
 
 `tools/pairharness/` builds LibreTransmitter's **real** pairing code (with the M3 patch) as an
-iOS-Simulator executable and pairs against a live libre2sim. See its README. Status: it builds and
-runs in the simulator, and fails cleanly when no server is running. **Next step:** run it against
-M2's server and check `RESULT: paired`, valid CRCs, `state` = ready, wear = 21600, a MAC equal to the
-advertised name, and sane calibration.
+iOS-Simulator executable and pairs against a live libre2sim. See its README. Status: passes against M2
+(finding 8). It also prints the FRAM trend decoded with LibreTransmitter's own algorithm.
 
 ## How to resume
 
-1. `cd /Users/bjorninge/Code/libre2sim && git log --oneline && git status`. Uncommitted files in
-   `libre2/` or at the top level are probably a finished or interrupted M2: run
+1. `cd /Users/bjorninge/Code/libre2sim && git log --oneline && git status`. Uncommitted files are
+   probably a finished or interrupted milestone (see the status table): run
    `GO111MODULE=on go test ./...` and review them before deciding to keep or redo.
-2. If M2 is incomplete, re-delegate it using the "Milestone 2" section of
-   `libre2-implementation-plan.md` together with findings 2 and 3 above.
-3. Verify M2: run the tests, then build and start the server
-   (`GO111MODULE=on go build -o /tmp/libre2sim . && /tmp/libre2sim -fresh -age 3h -api 127.0.0.1:8081`),
-   then run the pair harness. Commit.
-4. Delegate M4 (Opus). Verify by decrypting the notified packets with the Swift `Libre2.decryptBLE` and
+2. To run the server: `GO111MODULE=on go build -o /tmp/libre2sim . && /tmp/libre2sim -fresh -age 3h`
+   (API on :8081). Then run the pair harness.
+3. Delegate M4 (Opus). Verify by decrypting the notified packets with the Swift `Libre2.decryptBLE` and
    `parseBLEData` (extend `tools/swiftvectors` or the harness) and checking that
    `mgdlForRaw(raw)` ≈ the modelled glucose. Then M5 and M6.
-5. A full Loop build in the Simulator (LoopWorkspace + ImpossiBLE) is the final end-to-end check. It
+4. A full Loop build in the Simulator (LoopWorkspace + ImpossiBLE) is the final end-to-end check. It
    has not been attempted yet.
