@@ -21,6 +21,12 @@ type Sensor struct {
 	// taken at framAt (see readBlocks).
 	fram   []byte
 	framAt time.Time
+
+	// The BLE side (see ble.go). None of it is saved.
+	links        int       // links up: 1 while a central holds the link
+	outOfRange   time.Time // unreachable until then
+	strictUnlock bool      // refuse unlock counts at or below UnlockCount
+	nonce        uint16    // the last packet's n0 n1
 }
 
 func NewSensor(state *State, path string) *Sensor {
@@ -130,6 +136,12 @@ func (s *Sensor) Status() map[string]interface{} {
 		"unlockCount":      st.UnlockCount,
 		"calibration":      st.Calibration,
 		"glucoseMode":      st.Glucose,
+		"connected":        s.links > 0,
+		"advertising":      s.advertising(now),
+		"strictUnlock":     s.strictUnlock,
+	}
+	if now.Before(s.outOfRange) {
+		out["outOfRangeUntil"] = s.outOfRange.Format(time.RFC3339)
 	}
 	if st.StreamingCode != nil {
 		out["streamingCode"] = *st.StreamingCode

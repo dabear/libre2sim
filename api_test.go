@@ -205,3 +205,43 @@ func TestNFCErrorsOverHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkControlOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	id := sensor.NFCIdentifier()
+	uid := make([]byte, 8)
+	for i := range id {
+		uid[i] = id[7-i]
+	}
+	info, _ := sensor.NFCCustom(0xa1, nil, time.Now())
+	code, params := libre2.EnableStreamingCommand(uid, info, 42)
+	if _, err := sensor.NFCCustom(code, params, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path, body string) (int, map[string]interface{}) {
+		t.Helper()
+		resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var reply map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&reply)
+		return resp.StatusCode, reply
+	}
+	if s, r := call("/status", ""); s != http.StatusOK || r["advertising"] != true || r["connected"] != false {
+		t.Fatalf("status: HTTP %d %v", s, r)
+	}
+	if s, _ := call("/disconnect", ""); s != http.StatusConflict {
+		t.Errorf("disconnect with no link: HTTP %d", s)
+	}
+	if s, _ := call("/out-of-range", `{"minutes":0}`); s != http.StatusBadRequest {
+		t.Errorf("out of range for 0 minutes: HTTP %d", s)
+	}
+	if s, r := call("/out-of-range", `{"minutes":20}`); s != http.StatusOK || r["advertising"] != false || r["outOfRangeUntil"] == nil {
+		t.Errorf("out of range: HTTP %d %v", s, r)
+	}
+	if s, r := call("/terminate", ""); s != http.StatusOK || r["framState"] != float64(5) || r["terminated"] == nil {
+		t.Errorf("terminate: HTTP %d %v", s, r)
+	}
+}

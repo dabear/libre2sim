@@ -60,3 +60,110 @@ func encryptPacket(uid []byte, n0, n1 byte, pt44 []byte) []byte {
 	}
 	return out
 }
+
+// Building the packets a streaming sensor notifies on F002, in the layout
+// PreLibre2.parseBLEData (LoopKit/LibreTransmitter @ 4110512) reads.
+
+// trendAges are how many minutes before the packet's age each of its seven
+// trend records is: parseBLEData's ints.
+var trendAges = [7]int{0, 2, 4, 6, 7, 12, 15}
+
+const (
+	bleRecordSize  = 4 // one trend or history record in a packet
+	bleTrend       = 7 // records 0…6
+	bleHistory     = 3 // records 7…9
+	bleHistoryLag  = 2 // parseBLEData's delay
+	bleAgeOffset   = 40
+	bleCRCOffset   = 42
+	bleNotifyChunk = 20 // the sensor's notify size: 46 bytes go as 20 + 20 + 6
+)
+
+// historyMinute is the minute parseBLEData stamps history record i (7…9) of
+// a packet of age lc with: ((lc−2)/15)·15 − 15·(i−7). Swift's and Go's / both
+// truncate toward zero, so this is the same for lc < 2.
+func historyMinute(lc, i int) int {
+	return ((lc-bleHistoryLag)/15)*15 - 15*(i-bleTrend)
+}
+
+// putBLERecord writes a 4-byte packet record in parseBLEData's layout: raw
+// glucose in bits 0…13, raw temperature >> 2 in bits 14…25, |adjustment| >> 2
+// in bits 26…30 and its sign in bit 31.
+func putBLERecord(b []byte, raw uint16, rawTemperature, rawTemperatureAdjustment int) {
+	for i := range b[:bleRecordSize] {
+		b[i] = 0
+	}
+	writeBits(b, 0, 0, 0xe, int(raw))
+	writeBits(b, 0, 0xe, 0xc, rawTemperature>>2)
+	adj, neg := rawTemperatureAdjustment, 0
+	if adj < 0 {
+		adj, neg = -adj, 1
+	}
+	writeBits(b, 0, 0x1a, 0x5, adj>>2)
+	writeBits(b, 0, 0x1f, 0x1, neg)
+}
+
+// packetPlain is the 44-byte plaintext of the packet for life count lc, with
+// mu held: 7 trend records at lc − trendAges, 3 history records at
+// historyMinute, age = lc LE at bytes 40–41, and the CRC of bytes 0…41
+// big-endian at 42–43. Each record carries the modelled glucose of its
+// minute through rawForGlucose, with the calibration's fixed temperature
+// fields. A minute before the sensor started is an all-zero record; a minute
+// without a reading (warmup) has raw 0. parseBLEData skips both.
+func (s *State) packetPlain(lc int) []byte {
+	pt := make([]byte, packetPlainSz)
+	if s.Activated != nil {
+		s.fill(lc)
+	}
+	c := s.Calibration
+	record := func(i, minute int) {
+		if s.Activated == nil || minute < 0 {
+			return
+		}
+		raw := c.rawForGlucose(s.reading(minute))
+		putBLERecord(pt[i*bleRecordSize:], raw, c.RawTemperature, c.RawTemperatureAdjustment)
+	}
+	for i, ago := range trendAges {
+		record(i, lc-ago)
+	}
+	for i := bleTrend; i < bleTrend+bleHistory; i++ {
+		record(i, historyMinute(lc, i))
+	}
+	pt[bleAgeOffset], pt[bleAgeOffset+1] = byte(lc), byte(lc>>8)
+	crc := libreCRC16(pt[:bleCRCOffset])
+	pt[bleCRCOffset], pt[bleCRCOffset+1] = byte(crc>>8), byte(crc)
+	return pt
+}
+
+// packetPlain is State.packetPlain under the sensor's lock.
+func (s *Sensor) packetPlain(lc int) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.packetPlain(lc)
+}
+
+// packet is the encrypted 46-byte packet for life count lc. Its nonce bytes
+// n0 n1 are a per-sensor counter, low byte first (sim's choice: the app
+// takes whatever the sensor sends; a counter never repeats a keystream
+// within 65536 packets). The counter lives only while the emulator runs.
+func (s *Sensor) packet(lc int) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nonce++
+	return encryptPacket(s.state.uid(), byte(s.nonce), byte(s.nonce>>8), s.state.packetPlain(lc))
+}
+
+// notifyChunks splits a packet into the notifies the sensor sends it as:
+// 20 + 20 + 6 bytes. LibreTransmitter appends them and parses the buffer when
+// it holds exactly 46 bytes.
+func notifyChunks(pkt []byte) [][]byte {
+	var out [][]byte
+	for len(pkt) > 0 {
+		n := bleNotifyChunk
+		if len(pkt) < n {
+			n = len(pkt)
+		}
+		out = append(out, pkt[:n])
+		pkt = pkt[n:]
+	}
+	return out
+}

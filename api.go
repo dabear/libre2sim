@@ -18,6 +18,13 @@ import (
 //	                  {"kind":"walk","value":140}
 //	POST /activate               start a sensor that is still in its applicator
 //	                             (LibreTransmitter cannot)
+//	POST /disconnect             the sensor drops the link; the app reconnects
+//	POST /out-of-range {"minutes":20}
+//	                             drop the link and stay unreachable that long
+//	POST /terminate              end the sensor now: FRAM state 05, streaming
+//	                             stops and the link drops
+//	POST /force-quit             the app's end is a force-quit, not a
+//	                             termination: drop what it left lodged
 //	POST /new         {"wearDays":15,"warmupMinutes":60,"ageMinutes":0}
 //	                             replace the sensor with a new one and restart;
 //	                             ageMinutes 0 is a sensor still in its applicator
@@ -33,6 +40,8 @@ import (
 //	           an NFC error is HTTP 422 {"error":"…","code":n}
 type api struct {
 	sensor *libre2.Sensor
+	// radio is the BLE transport; nil (in tests) means no link to drop.
+	radio *SimRadio
 	// replace swaps in a new sensor; nil disables POST /new.
 	replace func(sensorConfig)
 	mux     *http.ServeMux
@@ -60,6 +69,42 @@ func newAPI(sensor *libre2.Sensor) *api {
 		}
 		log.Printf("activated")
 		writeJSON(w, sensor.Status())
+	})
+	a.post("/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		if a.radio == nil || !a.radio.Disconnect() {
+			writeError(w, http.StatusConflict, "no phone is connected", 0)
+			return
+		}
+		log.Printf("dropped the link")
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/out-of-range", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Minutes float64 `json:"minutes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Minutes <= 0 {
+			writeError(w, http.StatusBadRequest, `want {"minutes":n}`, 0)
+			return
+		}
+		sensor.GoOutOfRange(time.Duration(req.Minutes * float64(time.Minute)))
+		if a.radio != nil {
+			a.radio.Disconnect()
+		}
+		log.Printf("out of range for %g minutes", req.Minutes)
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/terminate", func(w http.ResponseWriter, r *http.Request) {
+		// The link's handler sees the sensor has ended within a second and
+		// hangs up; the sensor no longer advertises.
+		sensor.Terminate(time.Now())
+		log.Printf("terminated")
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/force-quit", func(w http.ResponseWriter, r *http.Request) {
+		if a.radio != nil {
+			a.radio.ForceQuit()
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	a.post("/new", func(w http.ResponseWriter, r *http.Request) {
 		if a.replace == nil {

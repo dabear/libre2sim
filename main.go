@@ -8,10 +8,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"syscall"
 	"time"
 
 	"libre2sim/libre2"
+	"libre2sim/suspend"
 )
 
 // sensorConfig describes a new sensor. Zero values pick defaults.
@@ -39,7 +41,16 @@ func main() {
 	days := flag.Int("days", 15, "wear duration of a new sensor, in days")
 	warmup := flag.Duration("warmup", time.Hour, "warmup of a new sensor")
 	apiAddr := flag.String("api", ":8081", "HTTP control and NFC API address")
+	socket := flag.String("socket", "/tmp/impossible-libre2.sock", "ImpossiBLE socket the app in the Simulator connects to")
+	strictUnlock := flag.Bool("strict-unlock", false, "accept a BLE unlock only if its count is above the last one accepted")
+	simulator := flag.String("simulator", "", "the app's simulator (name or UDID), for -relaunch and -suspend")
+	relaunch := flag.Bool("relaunch", false, "relaunch a terminated app for its lodged connect, as iOS does")
+	suspendApp := flag.Bool("suspend", false, "stop the app while iOS would have it suspended, waking it for Bluetooth events")
+	dylib := flag.String("dylib", "", "ImpossiBLE library injected into a relaunched app (default: simulator/build/libImpossiBLE.dylib beside libre2sim)")
 	flag.Parse()
+	if (*relaunch || *suspendApp) && *simulator == "" {
+		log.Fatalf("-relaunch and -suspend need -simulator")
+	}
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	var state *libre2.State
@@ -74,10 +85,20 @@ func main() {
 		state.Serial(), state.UID, state.PatchInfo, state.BLEAddress, state.WearMinutes/1440, state.WarmupMinutes, activated)
 
 	sensor := libre2.NewSensor(state, *statePath)
+	sensor.SetStrictUnlock(*strictUnlock)
 
-	// TODO(M4): start the BLE radio here (ImpossiBLE transport, advertising
-	// AdvertisedName once streaming is enabled, F001 unlock, F002 packets),
-	// and stop it in replace before re-executing.
+	// The BLE radio: the ImpossiBLE socket an app in the iOS Simulator
+	// talks CoreBluetooth through.
+	radio, err := NewSimRadio(sensor, *socket)
+	if err != nil {
+		log.Fatalf("serving %s: %v", *socket, err)
+	}
+	if *relaunch {
+		radio.Relaunch = simctlRelauncher(*simulator, *dylib)
+	}
+	if *suspendApp {
+		radio.Suspend = suspend.New(*simulator)
+	}
 
 	// replace swaps in a new sensor: it is saved over the state file and the
 	// emulator re-executes itself, so the new sensor starts exactly as a
@@ -89,6 +110,7 @@ func main() {
 			return
 		}
 		sensor.Retire()
+		radio.Stop()
 		if err := next.Save(*statePath); err != nil {
 			log.Fatalf("saving %s: %v", *statePath, err)
 		}
@@ -97,19 +119,21 @@ func main() {
 			log.Fatalf("restarting: %v", err)
 		}
 		log.Printf("restarting as the new sensor")
-		args := []string{exe, "-state", *statePath, "-api", *apiAddr}
+		args := []string{exe, "-state", *statePath, "-api", *apiAddr, "-socket", *socket,
+			"-strict-unlock=" + strconv.FormatBool(*strictUnlock), "-simulator", *simulator,
+			"-relaunch=" + strconv.FormatBool(*relaunch), "-suspend=" + strconv.FormatBool(*suspendApp),
+			"-dylib", *dylib}
 		log.Fatalf("restarting: %v", syscall.Exec(exe, args, os.Environ()))
 	}
 
 	a := newAPI(sensor)
+	a.radio = radio
 	a.replace = replace
 	go func() {
 		log.Printf("API on %s", *apiAddr)
 		log.Fatal(http.ListenAndServe(*apiAddr, a))
 	}()
 
-	sensor.Tick(time.Now())
-	for now := range time.Tick(5 * time.Second) {
-		sensor.Tick(now)
-	}
+	// The radio's clock also ticks the sensor.
+	radio.Run()
 }
