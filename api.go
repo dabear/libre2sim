@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -10,21 +11,36 @@ import (
 	"libre2sim/libre2"
 )
 
-// api exposes the sensor's state and lets a tester steer it:
+// api is libre2sim's control API. The whole of it, as libre3sim's, with the
+// Libre 2's own additions (/fault, /nfc, /activate). A POST that needs a body
+// answers 400 {"error","code"} to one it cannot use; a request for something
+// that is not possible now answers 409. Every POST except /new, /force-quit
+// and /nfc answers with the sensor's /status.
 //
-//	GET  /status                 the sensor and its latest reading
+//	GET  /                       the control panel (web.go)
+//	GET  /status                 the sensor and its latest reading; "fault" is
+//	                             there while a fault is armed
 //	POST /glucose     {"kind":"fixed","value":65}
 //	                  {"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}
 //	                  {"kind":"walk","value":140}
+//	                             how readings are made up from the next minute on;
+//	                             400 on any other kind
 //	POST /activate               start a sensor that is still in its applicator
-//	                             (LibreTransmitter cannot)
-//	POST /disconnect             the sensor drops the link; the app reconnects
+//	                             (LibreTransmitter cannot); 409 if already started
+//	POST /disconnect             the sensor drops the link; the app reconnects;
+//	                             409 if no phone is connected
 //	POST /out-of-range {"minutes":20}
-//	                             drop the link and stay unreachable that long
+//	                             drop the link and stay unreachable that long;
+//	                             400 unless minutes > 0
 //	POST /terminate              end the sensor now: FRAM state 05, streaming
 //	                             stops and the link drops
+//	POST /fault {"kind":"badcrc"|"short"|"none"}
+//	                             spoil the NEXT packet only: badcrc inverts its
+//	                             plaintext CRC (checksumValidationError in
+//	                             LibreTransmitter), short sends 45 bytes; none
+//	                             disarms. 400 on any other kind
 //	POST /force-quit             the app's end is a force-quit, not a
-//	                             termination: drop what it left lodged
+//	                             termination: drop what it left lodged (204)
 //	POST /new         {"wearDays":15,"warmupMinutes":60,"ageMinutes":0}
 //	                             replace the sensor with a new one and restart;
 //	                             ageMinutes 0 is a sensor still in its applicator
@@ -49,13 +65,21 @@ type api struct {
 
 func newAPI(sensor *libre2.Sensor) *api {
 	a := &api{sensor: sensor, mux: http.NewServeMux()}
+	a.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, indexHTML)
+	})
 	a.mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, sensor.Status())
 	})
 	a.post("/glucose", func(w http.ResponseWriter, r *http.Request) {
 		var m libre2.GlucoseMode
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || m.Kind == "" {
-			writeError(w, http.StatusBadRequest, "bad glucose mode", 0)
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || (m.Kind != "fixed" && m.Kind != "sine" && m.Kind != "walk") {
+			writeError(w, http.StatusBadRequest, `bad glucose mode; want kind "fixed", "sine" or "walk"`, 0)
 			return
 		}
 		sensor.SetGlucoseMode(m)
@@ -98,6 +122,25 @@ func newAPI(sensor *libre2.Sensor) *api {
 		// hangs up; the sensor no longer advertises.
 		sensor.Terminate(time.Now())
 		log.Printf("terminated")
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/fault", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Kind == "" {
+			writeError(w, http.StatusBadRequest, `want {"kind":"badcrc"|"short"|"none"}`, 0)
+			return
+		}
+		if err := sensor.ArmFault(req.Kind); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error(), 0)
+			return
+		}
+		if req.Kind == libre2.FaultNone {
+			log.Printf("fault disarmed")
+		} else {
+			log.Printf("fault %s armed for the next packet", req.Kind)
+		}
 		writeJSON(w, sensor.Status())
 	})
 	a.post("/force-quit", func(w http.ResponseWriter, r *http.Request) {

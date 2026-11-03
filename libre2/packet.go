@@ -4,7 +4,11 @@
 
 package libre2
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"log"
+)
 
 const (
 	packetSize    = 46 // n0 n1 ‖ ciphertext
@@ -148,8 +152,79 @@ func (s *Sensor) packetPlain(lc int) []byte {
 func (s *Sensor) packet(lc int) []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.packetLocked(lc, false)
+}
+
+func (s *Sensor) packetLocked(lc int, badCRC bool) []byte {
 	s.nonce++
-	return encryptPacket(s.state.uid(), byte(s.nonce), byte(s.nonce>>8), s.state.packetPlain(lc))
+	pt := s.state.packetPlain(lc)
+	if badCRC {
+		// Invert the CRC, which always changes it, before encrypting.
+		pt[bleCRCOffset] ^= 0xff
+		pt[bleCRCOffset+1] ^= 0xff
+	}
+	return encryptPacket(s.state.uid(), byte(s.nonce), byte(s.nonce>>8), pt)
+}
+
+// Faults the sensor can be armed with (POST /fault). An armed fault spoils
+// the next packet only and then disarms itself.
+const (
+	FaultNone   = "none"
+	FaultBadCRC = "badcrc"
+	FaultShort  = "short"
+)
+
+// shortPacketSize is how much of a packet the "short" fault sends: chunks of
+// 20 + 20 + 5 bytes.
+const shortPacketSize = packetSize - 1
+
+// ArmFault arms a one-shot fault for the next packet, or with FaultNone
+// disarms it.
+func (s *Sensor) ArmFault(kind string) error {
+	switch kind {
+	case FaultNone, FaultBadCRC, FaultShort:
+	default:
+		return fmt.Errorf("unknown fault %q; want %q, %q or %q", kind, FaultBadCRC, FaultShort, FaultNone)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if kind == FaultNone {
+		kind = ""
+	}
+	s.fault = kind
+	return nil
+}
+
+// Fault is the fault armed for the next packet, or "".
+func (s *Sensor) Fault() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fault
+}
+
+// notifies is what the sensor notifies on F002 for life count lc: the packet
+// as 20 + 20 + 6 byte chunks, spoiled if a fault is armed (which it disarms).
+//
+//   - badcrc: the plaintext CRC is inverted before encryption, so
+//     LibreTransmitter's decryptBLE fails with checksumValidationError.
+//   - short: only the first 45 bytes go out, as 20 + 20 + 5. LibreTransmitter
+//     parses its receive buffer only when it holds exactly 46 bytes, so the
+//     buffer then holds 45 stale bytes until its next reset (a reconnect),
+//     and the next minute's 46 bytes overshoot it and are never parsed. That
+//     is the point of the fault: how the app copes with a truncated packet.
+func (s *Sensor) notifies(lc int) [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fault := s.fault
+	s.fault = ""
+	pkt := s.packetLocked(lc, fault == FaultBadCRC)
+	if fault == FaultShort {
+		pkt = pkt[:shortPacketSize]
+	}
+	if fault != "" {
+		log.Printf("sending the packet for minute %d with fault %s", lc, fault)
+	}
+	return notifyChunks(pkt)
 }
 
 // notifyChunks splits a packet into the notifies the sensor sends it as:

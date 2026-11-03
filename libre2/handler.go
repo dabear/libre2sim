@@ -159,8 +159,7 @@ func (h *handler) send(now time.Time) {
 		return
 	}
 	h.sent = lc
-	pkt := h.s.packet(lc)
-	for _, chunk := range notifyChunks(pkt) {
+	for _, chunk := range h.s.notifies(lc) {
 		if err := h.link.Notify(CharNotify, chunk); err != nil {
 			log.Printf("%s packet for minute %d: %v", h.link.Addr(), lc, err)
 			return

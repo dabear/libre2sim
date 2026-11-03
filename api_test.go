@@ -245,3 +245,177 @@ func TestLinkControlOverHTTP(t *testing.T) {
 		t.Errorf("terminate: HTTP %d %v", s, r)
 	}
 }
+
+// call posts body to path and decodes the JSON reply.
+func call(t *testing.T, srv *httptest.Server, method, path, body string) (int, map[string]interface{}) {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var reply map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&reply)
+	return resp.StatusCode, reply
+}
+
+func TestControlPanel(t *testing.T) {
+	srv, _ := newTestServer(t, 3*time.Hour)
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var b bytes.Buffer
+	b.ReadFrom(resp.Body)
+	html := b.String()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("GET /: HTTP %d, %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	for _, want := range []string{"libre2sim", "/status", "/glucose", "/disconnect", "/out-of-range", "/terminate", "/fault", "/activate", "/new"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the panel does not mention %s", want)
+		}
+	}
+	// Self-contained: nothing is loaded from elsewhere.
+	for _, bad := range []string{"src=\"http", "href=\"http", "src='http", "@import", "//cdn"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("the panel loads an external asset: %s", bad)
+		}
+	}
+	if r, err := http.Get(srv.URL + "/nope"); err != nil || r.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /nope: %v, %v", r, err)
+	}
+}
+
+func TestGlucoseOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	if s, r := call(t, srv, "POST", "/glucose", `{"kind":"fixed","value":65}`); s != http.StatusOK || r["glucoseMode"] == nil {
+		t.Fatalf("fixed 65: HTTP %d %v", s, r)
+	}
+	if got := sensor.Status()["glucoseMode"].(libre2.GlucoseMode); got.Kind != "fixed" || got.Value != 65 {
+		t.Errorf("mode %+v", got)
+	}
+	for _, c := range []string{`{"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}`, `{"kind":"walk","value":140}`} {
+		if s, _ := call(t, srv, "POST", "/glucose", c); s != http.StatusOK {
+			t.Errorf("%s: HTTP %d", c, s)
+		}
+	}
+	for _, c := range []string{``, `{`, `{}`, `{"kind":"square","value":1}`, `[1]`} {
+		if s, r := call(t, srv, "POST", "/glucose", c); s != http.StatusBadRequest || r["error"] == nil {
+			t.Errorf("%q: HTTP %d %v, want 400", c, s, r)
+		}
+	}
+	if s, _ := call(t, srv, "GET", "/glucose", ""); s != http.StatusMethodNotAllowed {
+		t.Errorf("GET /glucose: HTTP %d", s)
+	}
+}
+
+func TestFaultOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	if _, r := call(t, srv, "GET", "/status", ""); r["fault"] != nil {
+		t.Fatalf("a fault is armed at the start: %v", r["fault"])
+	}
+	for _, k := range []string{"badcrc", "short"} {
+		if s, r := call(t, srv, "POST", "/fault", `{"kind":"`+k+`"}`); s != http.StatusOK || r["fault"] != k {
+			t.Fatalf("arm %s: HTTP %d %v", k, s, r)
+		}
+		if _, r := call(t, srv, "GET", "/status", ""); r["fault"] != k {
+			t.Errorf("status fault %v, want %s", r["fault"], k)
+		}
+		if sensor.Fault() != k {
+			t.Errorf("sensor fault %q, want %s", sensor.Fault(), k)
+		}
+	}
+	if s, r := call(t, srv, "POST", "/fault", `{"kind":"none"}`); s != http.StatusOK || r["fault"] != nil || sensor.Fault() != "" {
+		t.Errorf("disarm: HTTP %d %v, fault %q", s, r, sensor.Fault())
+	}
+	sensor.ArmFault("short")
+	for _, c := range []string{``, `{}`, `{"kind":"melt"}`, `{"kind":3}`} {
+		if s, r := call(t, srv, "POST", "/fault", c); s != http.StatusBadRequest || r["error"] == nil {
+			t.Errorf("%q: HTTP %d %v, want 400", c, s, r)
+		}
+	}
+	if sensor.Fault() != "short" {
+		t.Errorf("a refused fault changed the armed one to %q", sensor.Fault())
+	}
+	if s, _ := call(t, srv, "GET", "/fault", ""); s != http.StatusMethodNotAllowed {
+		t.Errorf("GET /fault: HTTP %d", s)
+	}
+}
+
+func TestActivateAndForceQuitOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 0) // in its applicator
+	if _, r := call(t, srv, "GET", "/status", ""); r["activated"] != nil {
+		t.Fatalf("activated at the start: %v", r["activated"])
+	}
+	if s, r := call(t, srv, "POST", "/activate", ""); s != http.StatusOK || r["activated"] == nil {
+		t.Errorf("activate: HTTP %d %v", s, r)
+	}
+	if s, r := call(t, srv, "POST", "/activate", ""); s != http.StatusConflict || r["error"] == nil {
+		t.Errorf("activate again: HTTP %d %v", s, r)
+	}
+	if s, _ := call(t, srv, "POST", "/force-quit", ""); s != http.StatusNoContent {
+		t.Errorf("force-quit: HTTP %d", s)
+	}
+	if s, _ := call(t, srv, "GET", "/force-quit", ""); s != http.StatusMethodNotAllowed {
+		t.Errorf("GET /force-quit: HTTP %d", s)
+	}
+}
+
+func TestNewOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 3*time.Hour)
+	// Without a way to restart, there is no /new.
+	if s, _ := call(t, srv, "POST", "/new", `{}`); s != http.StatusNotImplemented {
+		t.Errorf("/new without replace: HTTP %d", s)
+	}
+
+	state, err := libre2.NewState(15, time.Hour, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newAPI(libre2.NewSensor(state, t.TempDir()+"/state.json"))
+	got := make(chan sensorConfig, 1)
+	a.replace = func(c sensorConfig) { got <- c }
+	srv2 := httptest.NewServer(a)
+	defer srv2.Close()
+	for _, c := range []string{`{`, `{"wearDays":-1}`, `{"warmupMinutes":-5}`} {
+		if s, r := call(t, srv2, "POST", "/new", c); s != http.StatusBadRequest || r["error"] == nil {
+			t.Errorf("%q: HTTP %d %v, want 400", c, s, r)
+		}
+	}
+	if s, r := call(t, srv2, "POST", "/new", `{"wearDays":10,"warmupMinutes":5,"ageMinutes":30}`); s != http.StatusOK || r["status"] == nil {
+		t.Fatalf("/new: HTTP %d %v", s, r)
+	}
+	select {
+	case c := <-got:
+		if c.WearDays != 10 || *c.WarmupMinutes != 5 || c.AgeMinutes != 30 {
+			t.Errorf("config %+v", c)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("/new never replaced the sensor")
+	}
+}
+
+// Every control endpoint takes POST only (/status and / take GET).
+func TestMethodsOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 3*time.Hour)
+	for _, p := range []string{"/glucose", "/activate", "/disconnect", "/out-of-range", "/terminate", "/fault", "/force-quit", "/new", "/nfc"} {
+		if s, r := call(t, srv, "GET", p, ""); s != http.StatusMethodNotAllowed || r["error"] == nil {
+			t.Errorf("GET %s: HTTP %d %v", p, s, r)
+		}
+	}
+	if s, r := call(t, srv, "POST", "/out-of-range", `{"minutes":"x"}`); s != http.StatusBadRequest || r["error"] == nil {
+		t.Errorf("out-of-range with a string: HTTP %d %v", s, r)
+	}
+	if s, _ := call(t, srv, "POST", "/out-of-range", `{"minutes":-3}`); s != http.StatusBadRequest {
+		t.Errorf("out-of-range for -3 minutes: HTTP %d", s)
+	}
+	if s, _ := call(t, srv, "POST", "/nfc", `{`); s != http.StatusBadRequest {
+		t.Errorf("/nfc with bad JSON: HTTP %d", s)
+	}
+}

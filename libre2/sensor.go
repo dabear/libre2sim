@@ -27,6 +27,7 @@ type Sensor struct {
 	outOfRange   time.Time // unreachable until then
 	strictUnlock bool      // refuse unlock counts at or below UnlockCount
 	nonce        uint16    // the last packet's n0 n1
+	fault        string    // armed for the next packet only (see notifies); "" for none
 }
 
 func NewSensor(state *State, path string) *Sensor {
@@ -142,6 +143,9 @@ func (s *Sensor) Status() map[string]interface{} {
 	}
 	if now.Before(s.outOfRange) {
 		out["outOfRangeUntil"] = s.outOfRange.Format(time.RFC3339)
+	}
+	if s.fault != "" {
+		out["fault"] = s.fault
 	}
 	if st.StreamingCode != nil {
 		out["streamingCode"] = *st.StreamingCode
