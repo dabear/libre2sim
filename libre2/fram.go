@@ -136,8 +136,8 @@ func (s *State) plainFRAM(now time.Time) []byte {
 			}
 			return
 		}
-		raw := s.Calibration.rawForGlucose(s.reading(minute))
-		putMeasurement(dst, raw, s.Calibration.RawTemperature, s.Calibration.RawTemperatureAdjustment)
+		raw, t, adj := s.record(minute)
+		putMeasurement(dst, raw, t, adj)
 	}
 
 	body[2] = byte(lc % trendRecords)

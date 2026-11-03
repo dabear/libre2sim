@@ -57,6 +57,26 @@ type State struct {
 	// Readings holds the glucose of every minute of wear, by life count; 0
 	// where the sensor had none (warmup).
 	Readings []uint16 `json:"readings"`
+	// Temperature is the skin temperature from the next minute on; nil is the
+	// calibration's fixed temperature with no tissue lag.
+	Temperature *TemperatureMode `json:"temperature,omitempty"`
+	// SkinRaw and TissueCelsius hold, by life count like Readings, the raw
+	// temperature each minute's record carries and the tissue temperature its
+	// raw glucose was made at. A state saved before they existed has them
+	// shorter than Readings; those minutes use the calibration's temperature.
+	SkinRaw       []uint16  `json:"skinRaw,omitempty"`
+	TissueCelsius []float64 `json:"tissueCelsius,omitempty"`
+}
+
+// TemperatureMode is the skin temperature the sensor's thermistor reads, and
+// how far the tissue's temperature lags behind it. LibreTransmitter corrects
+// glucose for the thermistor's temperature; the glucose signal itself follows
+// the tissue. With a lag, a change of skin temperature reaches the raw glucose
+// over TissueLagMinutes (an exponential approach), so the correction is wrong
+// for a while.
+type TemperatureMode struct {
+	Celsius          float64 `json:"celsius"`
+	TissueLagMinutes float64 `json:"tissueLagMinutes"`
 }
 
 // NewState makes a sensor fresh from its applicator: not yet activated. A
@@ -165,8 +185,13 @@ func (s *State) lifeCount(now time.Time) int {
 
 // fill makes up readings through life count lc.
 func (s *State) fill(lc int) {
+	for len(s.SkinRaw) < len(s.Readings) { // a state saved without temperatures
+		s.SkinRaw = append(s.SkinRaw, uint16(s.Calibration.RawTemperature))
+		s.TissueCelsius = append(s.TissueCelsius, s.Calibration.temperature())
+	}
 	for len(s.Readings) <= lc && len(s.Readings) <= s.WearMinutes {
 		i := len(s.Readings)
+		s.fillTemperature()
 		if i < s.WarmupMinutes {
 			s.Readings = append(s.Readings, 0)
 			continue
@@ -174,6 +199,34 @@ func (s *State) fill(lc int) {
 		v := s.model(i)
 		s.Readings = append(s.Readings, uint16(math.Round(clampGlucose(v))))
 	}
+}
+
+// fillTemperature makes up the next minute's skin and tissue temperature.
+func (s *State) fillTemperature() {
+	c := s.Calibration
+	skin, lag := c.RawTemperature, 0.0
+	if t := s.Temperature; t != nil {
+		skin, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
+	}
+	celsius := c.temperatureFor(skin, c.RawTemperatureAdjustment)
+	tissue := celsius
+	if n := len(s.TissueCelsius); n > 0 && lag > 0 {
+		prev := s.TissueCelsius[n-1]
+		tissue = prev + (celsius-prev)*(1-math.Exp(-1/lag))
+	}
+	s.SkinRaw = append(s.SkinRaw, uint16(skin))
+	s.TissueCelsius = append(s.TissueCelsius, tissue)
+}
+
+// record is what minute's measurement record holds: its raw glucose (made at
+// the tissue temperature) and the thermistor's raw temperature and adjustment.
+func (s *State) record(minute int) (raw uint16, rawTemperature, rawTemperatureAdjustment int) {
+	c := s.Calibration
+	rawTemperature, tissue := c.RawTemperature, c.temperature()
+	if minute >= 0 && minute < len(s.SkinRaw) {
+		rawTemperature, tissue = int(s.SkinRaw[minute]), s.TissueCelsius[minute]
+	}
+	return c.rawForGlucoseAt(s.reading(minute), tissue), rawTemperature, c.RawTemperatureAdjustment
 }
 
 func (s *State) model(i int) float64 {

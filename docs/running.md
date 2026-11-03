@@ -36,8 +36,8 @@ to four pages:
   show where a warmup ends ("first reading") or the wear ends within that window. **Hover over (or tap) a minute** for
   its reading and the raw values its BLE record carries: the raw glucose, what LibreTransmitter computes from it, the
   raw temperature fields, and the 4-byte record, each with a short explanation.
-- **Sensor**: change the glucose model, drop the link or go out of range, spoil the next packet, activate, terminate or
-  replace the sensor; and the full status.
+- **Sensor**: change the glucose model or the skin temperature (and how far the tissue lags it), drop the link or go out
+  of range, spoil the next packet, activate, terminate or replace the sensor; and the full status.
 - **Event log**: every NFC command and answer (with hex and error codes), BLE connects, unlocks, packets, faults and sensor
   events. Filter it by NFC, BLE or Sensor, and pause it to read.
 - **Settings**: a strict-unlock toggle, the launch flags, and the sensor's identity (UID, serial, patch info, BLE address,

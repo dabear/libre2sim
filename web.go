@@ -196,6 +196,11 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
         <label class="field">period (min) <input id="period" type="number" value="240"></label>
         <button class="btn primary" onclick="setGlucose()">Set</button></div>
       <p class="note">A new model applies from the next minute on; minutes already made up stay as they were.</p></div>
+    <div class="card"><h2>Temperature</h2>
+      <div class="row"><label class="field">skin °C <input id="celsius" type="number" step="0.5" min="20" max="42" value="31.6"></label>
+        <label class="field">tissue lag (min) <input id="lag" type="number" step="1" min="0" max="60" value="0"></label>
+        <button class="btn primary" onclick="post('/temperature', {celsius: +val('celsius'), tissueLagMinutes: +val('lag')})">Set</button></div>
+      <p class="note">The thermistor reads the skin temperature, and LibreTransmitter corrects glucose with it (about 4.5% per °C). The glucose signal follows the tissue, which can lag the skin: with a lag, a temperature change makes the app's reading wrong for a while. From the next minute on; <span id="tempNow"></span></p></div>
     <div class="card"><h2>Link</h2>
       <div class="row"><button class="btn" onclick="post('/disconnect')">Drop the link</button></div>
       <div class="row"><label class="field">minutes <input id="outMinutes" type="number" value="20"></label>
@@ -415,12 +420,13 @@ function showTip(i) {
     if (rec) {
       const c = h.calibration || {};
       row('Raw glucose', String(rec.raw),
-        'Bits 0–13 of the record. The app computes 65·(raw − i3)/(i4 − i3) with the sensor\'s calibration (i3 = ' + c.i3 + ', i4 = ' + c.i4 + '), corrects it for temperature and applies its i2 = ' + c.i2 + ' tables; libre2sim picks the raw value that comes back as this reading.');
-      row('App computes', rec.appMgdl.toFixed(2) + ' mg/dL', 'LibreTransmitter\'s result before rounding, and before any slope or offset set in the app.');
+        'Bits 0–13 of the record. The app computes 65·(raw − i3)/(i4 − i3) with the sensor\'s calibration (i3 = ' + c.i3 + ', i4 = ' + c.i4 + '), corrects it for temperature and applies its i2 = ' + c.i2 + ' tables; libre2sim picks the raw value that comes back as this reading at the tissue\'s temperature.');
+      const off = rec.appMgdl - v;
+      row('App computes', rec.appMgdl.toFixed(2) + ' mg/dL', 'LibreTransmitter\'s result before rounding, and before any slope or offset set in the app.' +
+        (Math.abs(off) >= 0.5 ? ' It is ' + (off > 0 ? '+' : '') + off.toFixed(1) + ' mg/dL off: the app corrects with the skin temperature, but the tissue is still at ' + rec.tissueCelsius.toFixed(1) + ' °C.' : ''));
+      row('Raw temperature', rec.rawTemperature + ', adj. ' + signed(rec.rawTemperatureAdjustment),
+        'Bits 14–25 hold ' + rec.rawTemperature + ' >> 2, bits 26–30 the adjustment >> 2 and bit 31 its sign. With i6 = ' + c.i6 + ': ' + rec.celsius.toFixed(1) + ' °C skin temperature (the tissue: ' + rec.tissueCelsius.toFixed(1) + ' °C).');
     }
-    const t = h.temperature;
-    if (t) row('Raw temperature', t.raw + ', adj. ' + signed(t.adjustment),
-      'Bits 14–25 hold ' + t.raw + ' >> 2, bits 26–30 the adjustment >> 2 and bit 31 its sign. With i6 = ' + (h.calibration || {}).i6 + ': ' + t.celsius + ' °C. The same in every record libre2sim writes.');
     if (rec) row('BLE record', rec.ble, 'These fields as the packet carries them (before encryption), least significant bit first.');
   }
   tip.hidden = false;
@@ -487,6 +493,8 @@ function showStatus(s) {
   if (s.terminated) top.push(pill('terminated', 'bad'));
   top.push(pill(s.connected ? 'connected' : 'not connected', s.connected ? 'good' : ''));
   el('toppills').replaceChildren(...top);
+  const tp = s.temperature;
+  if (tp) el('tempNow').textContent = 'now ' + tp.celsius + ' °C skin, ' + tp.tissueCelsius + ' °C tissue, lag ' + tp.tissueLagMinutes + ' min.';
   const rest = {};
   for (const [k, v] of Object.entries(s)) if (k !== 'glucose' && k !== 'nextReading' && k !== 'trend') rest[k] = v;
   fill(el('status'), rest);

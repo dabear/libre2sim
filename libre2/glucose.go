@@ -44,12 +44,47 @@ func (c Calibration) info() map[string]int {
 	return map[string]int{"i1": c.I1, "i2": c.I2, "i3": c.I3, "i4": c.I4, "i5": c.I5, "i6": c.I6}
 }
 
-// measurementTemperature is the temperature every record the sim writes
-// carries: the raw fields and the °C glucoseValueFromRaw makes of them.
-func (c Calibration) measurementTemperature() map[string]interface{} {
-	return map[string]interface{}{"raw": c.RawTemperature, "adjustment": c.RawTemperatureAdjustment,
-		"celsius": math.Round(c.temperature()*10) / 10}
+// measurementTemperature is the temperature records carry from the next
+// minute on: the raw fields and the °C glucoseValueFromRaw makes of them, the
+// tissue's latest temperature and how far it lags the skin.
+func (s *State) measurementTemperature() map[string]interface{} {
+	c := s.Calibration
+	raw, lag := c.RawTemperature, 0.0
+	if t := s.Temperature; t != nil {
+		raw, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
+	}
+	celsius := c.temperatureFor(raw, c.RawTemperatureAdjustment)
+	tissue := celsius
+	if n := len(s.TissueCelsius); n > 0 {
+		tissue = s.TissueCelsius[n-1]
+	}
+	return map[string]interface{}{"raw": raw, "adjustment": c.RawTemperatureAdjustment,
+		"celsius": math.Round(celsius*10) / 10, "tissueCelsius": math.Round(tissue*10) / 10, "tissueLagMinutes": lag}
 }
+
+// rawTemperatureFor is the raw temperature field (a multiple of 4, as records
+// hold it >> 2) whose temperature is nearest celsius, with the calibration's
+// adjustment. The thermistor's temperature falls as the raw value rises.
+func (c Calibration) rawTemperatureFor(celsius float64) int {
+	lo, hi := 1, maxRawTemperature/4 // in units of 4
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if c.temperatureFor(mid*4, c.RawTemperatureAdjustment) > celsius {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	best := lo
+	if lo > 1 && math.Abs(c.temperatureFor((lo-1)*4, c.RawTemperatureAdjustment)-celsius) <
+		math.Abs(c.temperatureFor(lo*4, c.RawTemperatureAdjustment)-celsius) {
+		best = lo - 1
+	}
+	return best * 4
+}
+
+// maxRawTemperature is the largest raw temperature a record holds (12 bits << 2).
+const maxRawTemperature = (1<<12 - 1) << 2
 
 // The temperature fields of BLEExample's first record (see Calibration).
 const (
@@ -63,6 +98,11 @@ const maxRaw = 1<<14 - 1
 // temperature is glucoseValueFromRaw's thermistor model: the sensor's
 // temperature in °C for the calibration's fixed temperature fields.
 func (c Calibration) temperature() float64 {
+	return c.temperatureFor(c.RawTemperature, c.RawTemperatureAdjustment)
+}
+
+// temperatureFor is the thermistor model for a record's temperature fields.
+func (c Calibration) temperatureFor(rawTemperature, rawTemperatureAdjustment int) float64 {
 	const (
 		x  = 1000 + 71500
 		y  = 1000
@@ -71,7 +111,7 @@ func (c Calibration) temperature() float64 {
 		cc = 0.0000007061775
 		cd = 0.00000005283566
 	)
-	r := float64(c.RawTemperature)*x/(float64(c.RawTemperatureAdjustment)+float64(c.I6)) - y
+	r := float64(rawTemperature)*x/(float64(rawTemperatureAdjustment)+float64(c.I6)) - y
 	logR := math.Log(r)
 	d := math.Pow(logR, 3)*cd + math.Pow(logR, 2)*cc + logR*cb + ca
 	return 1/d - 273.15
@@ -80,9 +120,12 @@ func (c Calibration) temperature() float64 {
 // mgdlForRaw is glucoseValueFromRaw: the unrounded mg/dL LibreTransmitter
 // computes for raw (before extraSlope/extraOffset, which default to 1 and 0).
 // Like the Swift, it indexes t1 and t2 with I2-1, so I2 must be in 1…1023.
-func (c Calibration) mgdlForRaw(raw int) float64 {
+func (c Calibration) mgdlForRaw(raw int) float64 { return c.mgdlForRawAt(raw, c.temperature()) }
+
+// mgdlForRawAt is glucoseValueFromRaw at a sensor temperature in °C.
+func (c Calibration) mgdlForRawAt(raw int, celsius float64) float64 {
 	g1 := 65.0 * (float64(raw) - float64(c.I3)) / (float64(c.I4) - float64(c.I3))
-	g2 := math.Pow(1.045, 32.5-c.temperature())
+	g2 := math.Pow(1.045, 32.5-celsius)
 	g3 := g1 * g2
 	v1 := t1[c.I2-1]
 	v2 := t2[c.I2-1]
@@ -97,10 +140,15 @@ func (c Calibration) mgdlForRaw(raw int) float64 {
 // rounded and held to 1…16383. 0 stays 0: no reading (warmup), which the app
 // skips.
 func (c Calibration) rawForGlucose(mgdl uint16) uint16 {
+	return c.rawForGlucoseAt(mgdl, c.temperature())
+}
+
+// rawForGlucoseAt is rawForGlucose at a sensor temperature in °C.
+func (c Calibration) rawForGlucoseAt(mgdl uint16, celsius float64) uint16 {
 	if mgdl == 0 {
 		return 0
 	}
-	g2 := math.Pow(1.045, 32.5-c.temperature())
+	g2 := math.Pow(1.045, 32.5-celsius)
 	v1 := t1[c.I2-1]
 	v2 := t2[c.I2-1]
 	raw := float64(c.I3) + (float64(c.I4)-float64(c.I3))/65*(float64(mgdl)*v2+v1)/g2

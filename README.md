@@ -186,6 +186,7 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | `POST /config` | `{"strictUnlock":true}`: toggle strict unlock at run time (the only setting that is safe to change live); answers like `GET /config`. 400 on anything else |
 | `GET /status` | UID, serial, patch info, BLE address and advertised name, `calibration` (`i1`…`i6`, as LibreTransmitter's `CalibrationInfo`), `temperature` (`raw`, `adjustment`, `celsius`: the fixed values every measurement record carries; per measurement in LibreTransmitter, not calibration), FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed. Also `strictUnlock`, `unlocksAccepted`/`unlocksRefused` (since launch), `nextReading` (`{minute, mgdl, warmup, estimate, noiseSD, at, atMs, inSeconds}`) and `trend` (`delta1`, `delta5`, `delta15`: mg/dL against that many minutes earlier) |
 | `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`; applies from the next minute. 400 on another kind |
+| `POST /temperature` | `{"celsius":28,"tissueLagMinutes":5}`: the skin temperature the thermistor reads (20–42 °C) from the next minute on, and how many minutes the tissue, which the raw glucose follows, lags it (0–60). LibreTransmitter corrects with the skin temperature, so with a lag its reading is off for a while after a change. 400 out of range |
 | `POST /activate` | start a sensor still in its applicator (the Abbott app's job on a real one; LibreTransmitter cannot). 409 if already started |
 | `POST /end-warmup` | end the warmup early: the next minute is the first with a reading (the panel's "End warmup now"). 409 unless the sensor is in warmup |
 | `POST /disconnect` | the sensor drops the link and the app reconnects. 409 if no phone is connected |
@@ -221,6 +222,8 @@ Every check below runs LibreTransmitter's own Swift, not a re-implementation of 
   the packets with LibreTransmitter's `decryptBLE` and `parseBLEData`.
 - [tools/cbharness](tools/cbharness/README.md): real CoreBluetooth with the real ImpossiBLE library, driving LibreTransmitter's
   real `Libre2DirectTransmitter` plugin through pairing, scan, connect, unlock and streaming.
+- [tools/algoharness](tools/algoharness/README.md): runs a LibreTransmitter checkout's own glucose algorithm on libre2sim's
+  records, for scenarios such as a skin temperature step with the tissue lagging, and reports how far each minute is off.
 
 `GO111MODULE=on go test -race ./...` runs the Go tests. [docs/scenarios.md](docs/scenarios.md) lists the manual scenarios for
 Loop and which ones have been run. The LibreTransmitter change was merged as

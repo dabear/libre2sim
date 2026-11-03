@@ -602,3 +602,15 @@ func TestEndWarmupOverHTTP(t *testing.T) {
 		t.Errorf("GET: HTTP %d, want 405", s)
 	}
 }
+
+func TestTemperatureOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 3*time.Hour)
+	if s, r := call(t, srv, "POST", "/temperature", `{"celsius":28,"tissueLagMinutes":5}`); s != http.StatusOK {
+		t.Fatalf("HTTP %d %v", s, r)
+	} else if temp, _ := r["temperature"].(map[string]interface{}); temp["celsius"] != 28.0 || temp["tissueLagMinutes"] != 5.0 {
+		t.Errorf("status temperature %v", r["temperature"])
+	}
+	if s, _ := call(t, srv, "POST", "/temperature", `{"celsius":50}`); s != http.StatusBadRequest {
+		t.Errorf("50 °C: HTTP %d, want 400", s)
+	}
+}

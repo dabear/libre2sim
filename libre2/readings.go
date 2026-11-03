@@ -142,21 +142,33 @@ type History struct {
 type RecordDetail struct {
 	// Raw is the 14-bit raw glucose, 0 for a minute without a reading.
 	Raw int `json:"raw"`
-	// AppMgDl is the unrounded mg/dL LibreTransmitter computes from Raw
-	// (glucoseValueFromRaw); 0 when Raw is 0.
+	// RawTemperature and RawTemperatureAdjustment are the record's
+	// temperature fields; Celsius is what the app's thermistor model makes of
+	// them, TissueCelsius the temperature Raw was made at.
+	RawTemperature           int     `json:"rawTemperature"`
+	RawTemperatureAdjustment int     `json:"rawTemperatureAdjustment"`
+	Celsius                  float64 `json:"celsius"`
+	TissueCelsius            float64 `json:"tissueCelsius"`
+	// AppMgDl is the unrounded mg/dL LibreTransmitter computes from Raw at
+	// the record's own temperature (glucoseValueFromRaw); 0 when Raw is 0.
+	// It differs from the reading while the tissue lags the skin.
 	AppMgDl float64 `json:"appMgdl"`
 	// BLE is the 4-byte record, in hex.
 	BLE string `json:"ble"`
 }
 
-// recordDetail is how mgdl goes over BLE with the calibration c.
-func recordDetail(c Calibration, mgdl uint16) RecordDetail {
-	raw := c.rawForGlucose(mgdl)
+// recordDetail is how mgdl goes over BLE with raw temperature rawT, its raw
+// glucose made at tissue °C.
+func recordDetail(c Calibration, mgdl uint16, rawT int, tissue float64) RecordDetail {
+	raw := c.rawForGlucoseAt(mgdl, tissue)
+	adj := c.RawTemperatureAdjustment
 	b := make([]byte, bleRecordSize)
-	putBLERecord(b, raw, c.RawTemperature, c.RawTemperatureAdjustment)
-	d := RecordDetail{Raw: int(raw), BLE: fmt.Sprintf("% x", b)}
+	putBLERecord(b, raw, rawT, adj)
+	celsius := c.temperatureFor(rawT, adj)
+	d := RecordDetail{Raw: int(raw), RawTemperature: rawT, RawTemperatureAdjustment: adj, BLE: fmt.Sprintf("% x", b),
+		Celsius: math.Round(celsius*100) / 100, TissueCelsius: math.Round(tissue*100) / 100}
 	if raw != 0 {
-		d.AppMgDl = math.Round(c.mgdlForRaw(int(raw))*100) / 100
+		d.AppMgDl = math.Round(c.mgdlForRawAt(int(raw), celsius)*100) / 100
 	}
 	return d
 }
@@ -170,7 +182,7 @@ func (s *Sensor) History(minutes, ahead int, now time.Time) History {
 	if st.Activated == nil {
 		return h
 	}
-	h.Calibration, h.Temperature = st.Calibration.info(), st.Calibration.measurementTemperature()
+	h.Calibration, h.Temperature = st.Calibration.info(), st.measurementTemperature()
 	h.ActivatedMs = st.Activated.UnixNano() / int64(time.Millisecond)
 	lc := st.framMinutes(now)
 	st.fill(lc)
@@ -182,13 +194,35 @@ func (s *Sensor) History(minutes, ahead int, now time.Time) History {
 	for i := first; i <= lc; i++ {
 		v := st.reading(i)
 		h.Values = append(h.Values, v)
-		h.Records = append(h.Records, recordDetail(st.Calibration, v))
+		_, rawT, _ := st.record(i)
+		tissue := st.Calibration.temperature()
+		if i < len(st.TissueCelsius) {
+			tissue = st.TissueCelsius[i]
+		}
+		h.Records = append(h.Records, recordDetail(st.Calibration, v, rawT, tissue))
 	}
 	h.Next, h.Trend = s.nextReading(now), s.trend(now)
 	if ahead > 0 {
 		h.Ahead, h.WearEnds = s.upcoming(now, ahead)
+		// The coming minutes at the current temperature setting, the tissue
+		// still approaching it.
+		c := st.Calibration
+		rawT, lag := c.RawTemperature, 0.0
+		if t := st.Temperature; t != nil {
+			rawT, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
+		}
+		skin := c.temperatureFor(rawT, c.RawTemperatureAdjustment)
+		tissue := skin
+		if n := len(st.TissueCelsius); n > 0 {
+			tissue = st.TissueCelsius[n-1]
+		}
 		for _, r := range h.Ahead {
-			h.AheadRecords = append(h.AheadRecords, recordDetail(st.Calibration, uint16(r.MgDl)))
+			if lag > 0 {
+				tissue += (skin - tissue) * (1 - math.Exp(-1/lag))
+			} else {
+				tissue = skin
+			}
+			h.AheadRecords = append(h.AheadRecords, recordDetail(c, uint16(r.MgDl), rawT, tissue))
 		}
 	}
 	return h

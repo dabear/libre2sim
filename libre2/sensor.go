@@ -2,6 +2,7 @@ package libre2
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -155,6 +156,30 @@ func (s *Sensor) SetGlucoseMode(m GlucoseMode) {
 	s.events.Add(CatSensor, "glucose-mode", "glucose mode now %s (amplitude %g, period %g min)", m, m.Amplitude, m.PeriodMinutes)
 }
 
+// SetTemperature sets the skin temperature, and the tissue's lag behind it,
+// from the next minute on.
+func (s *Sensor) SetTemperature(m TemperatureMode, now time.Time) error {
+	if m.Celsius < minCelsius || m.Celsius > maxCelsius || m.TissueLagMinutes < 0 || m.TissueLagMinutes > 60 {
+		return fmt.Errorf("want celsius %g…%g and tissueLagMinutes 0…60", minCelsius, maxCelsius)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.Activated != nil {
+		s.state.fill(s.state.lifeCount(now))
+	}
+	s.state.Temperature = &m
+	s.changed()
+	s.events.Add(CatSensor, "temperature", "skin temperature now %.1f °C (raw %d), the tissue lagging %g min",
+		m.Celsius, s.state.Calibration.rawTemperatureFor(m.Celsius), m.TissueLagMinutes)
+	return nil
+}
+
+// The skin temperatures POST /temperature takes.
+const (
+	minCelsius = 20.0
+	maxCelsius = 42.0
+)
+
 func (s *Sensor) Status() map[string]interface{} {
 	now := time.Now()
 	s.mu.Lock()
@@ -172,7 +197,7 @@ func (s *Sensor) Status() map[string]interface{} {
 		"streamingEnabled": st.StreamingCode != nil,
 		"unlockCount":      st.UnlockCount,
 		"calibration":      st.Calibration.info(),
-		"temperature":      st.Calibration.measurementTemperature(),
+		"temperature":      st.measurementTemperature(),
 		"glucoseMode":      st.Glucose,
 		"connected":        s.links > 0,
 		"advertising":      s.advertising(now),

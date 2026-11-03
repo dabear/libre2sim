@@ -38,6 +38,10 @@ import (
 //	                  {"kind":"walk","value":140}
 //	                             how readings are made up from the next minute on;
 //	                             400 on any other kind
+//	POST /temperature {"celsius":28,"tissueLagMinutes":5}
+//	                             the skin temperature the thermistor reads from the
+//	                             next minute on (20…42 °C), and how many minutes the
+//	                             tissue (which the raw glucose follows) lags it
 //	POST /activate               start a sensor that is still in its applicator
 //	POST /end-warmup             end the warmup at the next minute; 409 unless in warmup
 //	                             (LibreTransmitter cannot); 409 if already started
@@ -160,6 +164,19 @@ func newAPI(sensor *libre2.Sensor) *api {
 		}
 		sensor.SetGlucoseMode(m)
 		log.Printf("glucose mode now %s", m)
+		writeJSON(w, sensor.Status())
+	})
+	a.post("/temperature", func(w http.ResponseWriter, r *http.Request) {
+		var m libre2.TemperatureMode
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			writeError(w, http.StatusBadRequest, "bad temperature; want {\"celsius\":31.6,\"tissueLagMinutes\":0}", 0)
+			return
+		}
+		if err := sensor.SetTemperature(m, time.Now()); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error(), 0)
+			return
+		}
+		log.Printf("skin temperature now %.1f °C, tissue lag %g min", m.Celsius, m.TissueLagMinutes)
 		writeJSON(w, sensor.Status())
 	})
 	a.post("/activate", func(w http.ResponseWriter, r *http.Request) {

@@ -109,22 +109,21 @@ func putBLERecord(b []byte, raw uint16, rawTemperature, rawTemperatureAdjustment
 // packetPlain is the 44-byte plaintext of the packet for life count lc, with
 // mu held: 7 trend records at lc − trendAges, 3 history records at
 // historyMinute, age = lc LE at bytes 40–41, and the CRC of bytes 0…41
-// big-endian at 42–43. Each record carries the modelled glucose of its
-// minute through rawForGlucose, with the calibration's fixed temperature
-// fields. A minute before the sensor started is an all-zero record; a minute
+// big-endian at 42–43. Each record is its minute's State.record: the
+// modelled glucose as raw glucose at that minute's tissue temperature, and
+// the skin temperature's fields. A minute before the sensor started is an all-zero record; a minute
 // without a reading (warmup) has raw 0. parseBLEData skips both.
 func (s *State) packetPlain(lc int) []byte {
 	pt := make([]byte, packetPlainSz)
 	if s.Activated != nil {
 		s.fill(lc)
 	}
-	c := s.Calibration
 	record := func(i, minute int) {
 		if s.Activated == nil || minute < 0 {
 			return
 		}
-		raw := c.rawForGlucose(s.reading(minute))
-		putBLERecord(pt[i*bleRecordSize:], raw, c.RawTemperature, c.RawTemperatureAdjustment)
+		raw, t, adj := s.record(minute)
+		putBLERecord(pt[i*bleRecordSize:], raw, t, adj)
 	}
 	for i, ago := range trendAges {
 		record(i, lc-ago)
