@@ -53,7 +53,7 @@ session should re-clone them (shallow is fine) into its own scratchpad.
 | M1 | Crypto + CRC port (`libre2/crypto.go crc.go fram.go packet.go unlock.go`) + Swift golden vectors (`tools/swiftvectors`, `testdata/swift_vectors.json`) | ✅ done, verified | `be5ec61` |
 | M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, verified live through the pair harness | `0b3be5d` |
 | M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | ✅ done, verified live (see finding 8) | `f3a79e7` |
-| M4 | BLE: adapt `ref/libre3sim/impossible.go.txt` (service FDE3, F001 write, F002 notify, advert name = MAC), handler (unlock check → 46-byte packet each minute as 20+20+6), packet builder | ⏳ todo | — |
+| M4 | BLE: adapt `ref/libre3sim/impossible.go.txt` (service FDE3, F001 write, F002 notify, advert name = MAC), handler (unlock check → 46-byte packet each minute as 20+20+6), packet builder, /disconnect /out-of-range /terminate | 🔄 in progress (subagent, Opus, started after `8ab4e5e`). It uses its own socket and port 8092 under the scratchpad for its live smoke test | — |
 | M5 | Control API + faults (`/terminate`, `/out-of-range`, `/disconnect`, `/fault`), scenario checklist in Loop | ⏳ todo | — |
 | M6 | README, credits, LibreTransmitter PR text | ⏳ todo | — |
 
@@ -96,6 +96,19 @@ session should re-clone them (shallow is fine) into its own scratchpad.
     glucose mode only affects future minutes (as in libre3sim).
 
 ## Independent check harness (orchestrator-owned)
+
+**BLE harness (`tools/bleharness/`, for verifying M4):** a macOS Swift program built from LibreTransmitter's
+real `PreLibre2.swift`, `CRC.swift`, `SensorData`, `GlucoseFromRaw` and the M3 `Libre2NFC.swift`. It pairs over
+`/nfc`, then speaks the ImpossiBLE JSON socket protocol directly as a central: scan, match name == MAC,
+connect, discover, notify F002, write the real `Libre2.streamingUnlockPayload` to F001, reassemble the
+46 bytes, and run the real `decryptBLE`, `parseBLEData` and `calibratedGlucose`.
+
+**ImpossiBLE itself has not been built yet.** `simulator/build-impossible.sh` clones and compiles
+github.com/mickeyl/ImpossiBLE, and the auto-mode classifier denied that ("Code from External"). It
+needs the user's go-ahead, or the user can run `! sh simulator/build-impossible.sh` themselves. Until
+then, compatibility with the real ImpossiBLE dylib is unverified: the socket protocol is the one
+libre3sim implements.
+
 
 `tools/pairharness/` builds LibreTransmitter's **real** pairing code (with the M3 patch) as an
 iOS-Simulator executable and pairs against a live libre2sim. See its README. Status: passes against M2
