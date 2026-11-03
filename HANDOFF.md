@@ -45,7 +45,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | `libre2-implementation-plan.md` | Milestones M0–M6: files, signatures, tests, "done when" |
 | `docs/scenarios.md` | 8 manual scenarios with curl commands and expected results; verification marks per scenario |
 | `docs/libre3sim-transport-fixes.md` | Two transport bugs found in libre3sim, with diffs (for upstreaming) |
-| `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | The LibreTransmitter patch (against `4110512`) |
+| `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | The LibreTransmitter patch (against `4110512`); minimal 3-file version since session 2 (finding 23) |
 | `integration/LibreTransmitter/PR.md` | Ready-to-paste PR description for that patch |
 
 ## 3. Code map
@@ -163,6 +163,13 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     Note: cbharness stdout to a file is buffered, so "PACKET n" can appear in the file a little late.
 22. **Scenario 7 (cbharness):** `/new` (age 180) → new UID/serial/MAC, not advertising until NFC enables streaming;
     `RECONNECT=1` with the old sensor finds nothing (timeout); a fresh pairing gets the new MAC and streams.
+23. **Minimal LibreTransmitter patch (session 2, replaces the 6-file one):** 3 files, +160/−1, no new file, no pbxproj, no
+    refactor. `SimulatedSensorPairingService` lives at the end of `SensorPairingService.swift` under `#if targetEnvironment(simulator)`
+    and calls the real `SensorPairingService().nfcCommand(.enableStreaming, …)` (`private` → `fileprivate`, the only edit to
+    existing code); plus the 4-line hooks in `Features.swift` and `LibreTransmitterManagerV3.swift`. Verified: Simulator build +
+    **device typecheck (exit 0)**, a negative control (device build can't see the simulated class), and pairharness,
+    bleharness and cbharness all `RESULT: OK` live. bleharness now builds the enable command itself from the real
+    `Libre2.usefulFunction` (Libre2NFC is gone); libre2sim's `d` check accepted it.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 

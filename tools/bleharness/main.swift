@@ -1,6 +1,5 @@
 // Independent end-to-end check of libre2sim's BLE side, built from LibreTransmitter's
-// own Swift (PreLibre2, CRC, SensorData, GlucoseFromRaw, and Libre2NFC from the
-// integration patch). It pairs over libre2sim's /nfc as the app does, then acts as
+// own Swift (PreLibre2, CRC, SensorData, GlucoseFromRaw). It pairs over libre2sim's /nfc as the app does, then acts as
 // an ImpossiBLE client on the provider socket: scan, match name == MAC, connect,
 // discover FDE3/F001/F002, enable F002 notifications, write the real streaming
 // unlock payload to F001, reassemble the 46-byte packet, and decode it with the
@@ -63,8 +62,12 @@ for first in stride(from: 0, to: 43, by: 3) {
     let r = post("nfc", ["op": "readBlocks", "first": first, "count": Swift.min(3, 43 - first)])
     for b in (r["blocks"] as? [String]) ?? [] { fram += hexData(b) }
 }
-let cmd = Libre2NFC.enableStreamingCommand(unlockCode: 42, patchInfo: info, sensorUID: uid)
-let macResp = nfc(["op": "custom", "code": Int(cmd.code), "parameters": cmd.parameters.hexEncodedString()])
+// SensorPairingService.nfcCommand(.enableStreaming, unlockCode: 42, …), which is fileprivate there:
+// [0x1e] + unlock code (LE) + Libre2.usefulFunction(uid, 0x1e, patchInfo[4...5] ^ code's low 16 bits)
+let code: [UInt8] = [42, 0, 0, 0]
+let y = (UInt16(info[5]) << 8 | UInt16(info[4])) ^ (UInt16(code[1]) << 8 | UInt16(code[0]))
+let params = Data([0x1e] + code + Libre2.usefulFunction(id: [UInt8](uid), x: 0x1e, y: y))
+let macResp = nfc(["op": "custom", "code": 0xA1, "parameters": params.hexEncodedString()])
 let mac = Data(macResp.reversed()).hexEncodedString().uppercased()
 let plain = try Libre2.decryptFRAM(type: .libre2, id: [UInt8](uid), info: info, data: [UInt8](fram))
 guard let sensorData = SensorData(bytes: plain) else { fail("FRAM header CRC") }

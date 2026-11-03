@@ -1,8 +1,9 @@
 # bleharness
 
 An independent end-to-end check of libre2sim's BLE side. It is built from LibreTransmitter's own Swift:
-`PreLibre2.swift` (unlock payload, `decryptBLE`, `parseBLEData`), `SensorData`, `GlucoseFromRaw`, and
-`Libre2NFC.swift` from the integration patch.
+`PreLibre2.swift` (unlock payload, `decryptBLE`, `parseBLEData`, `usefulFunction`), `SensorData` and `GlucoseFromRaw`.
+The enable-streaming command is built from `usefulFunction` as `SensorPairingService.nfcCommand` does (that
+function is `fileprivate`).
 
 It pairs over `/nfc`, then acts as an ImpossiBLE client on the provider socket. It scans, matches
 the advertised name against the MAC, connects, discovers FDE3/F001/F002, enables F002, writes the

@@ -3,17 +3,18 @@
 ## What
 
 Libre 2 pairing in the iOS Simulator, against libre2sim, an emulator of a Libre 2 sensor for
-development.
+development. The change is three small edits, all inert on a device:
 
-- `SimulatedSensorPairingService` (Simulator builds only: the file is wrapped in `#if targetEnvironment(simulator)`) is a
-  `SensorPairingProtocol` that asks libre2sim's HTTP API the questions `SensorPairingService` asks over CoreNFC (tag
-  identifier, system info, patch info `A1`, 43 blocks of FRAM in requests of 3, then enable streaming), in the same order, and the answers go
-  through the same checks. It reads `LIBRE2SIM_URL`, default `http://127.0.0.1:8081`.
-- The enable-streaming NFC command is moved out of `SensorPairingService` (its private `nfcCommand`, `NFCCommand` and `Subcommand`) into a
-  new `Libre2NFC.swift` (`NFCCommand`, `Subcommand`, `Libre2NFC.enableStreamingCommand`), so the CoreNFC service and the Simulator's stand-in build the same bytes and cannot drift
-  apart.
-- `LibreTransmitterManagerV3.pairingService` returns the simulated service on the Simulator, and `Features.phoneNFCAvailable`
-  is `true` there (so the pairing UI offers a scan).
+- `SensorPairingService.swift`: at the end of the file, inside `#if targetEnvironment(simulator)`,
+  `SimulatedSensorPairingService`, a `SensorPairingProtocol` that asks libre2sim's HTTP API the questions
+  `SensorPairingService` asks over CoreNFC (tag identifier, system info, patch info `A1`, 43 blocks of FRAM in requests of 3,
+  then enable streaming), in the same order, and puts the answers through the same checks. It reads `LIBRE2SIM_URL`, default
+  `http://127.0.0.1:8081`. The enable-streaming command is built by `SensorPairingService`'s own `nfcCommand`, so the two
+  cannot drift apart. That method goes from `private` to `fileprivate`; this is the only change to existing code.
+- `LibreTransmitterManagerV3.pairingService` returns the simulated service on the Simulator.
+- `Features.phoneNFCAvailable` is `true` on the Simulator, so the pairing UI offers a scan.
+
+No new files, so the Xcode project is unchanged.
 
 ## Why
 
@@ -26,12 +27,9 @@ repeatable, and lets a change to this code be tested without a sensor.
 
 ## Behaviour on a device is unchanged
 
-- Everything new is behind `#if targetEnvironment(simulator)`, apart from `Libre2NFC.swift`.
-- `Libre2NFC.enableStreamingCommand` produces the same bytes as the `nfcCommand` it replaces: it is that function with the
-  `.enableStreaming` branch kept and the unused `else` branch (`y = 0x1b6a`, only for other subcommands) dropped, as nothing called it
-  with another subcommand. `NFCCommand` and `Subcommand` are moved as they were, only no longer `private`.
-- The new files are registered in the Xcode project, and the project typechecks for both the Simulator and device
-  targets.
+- Everything new is behind `#if targetEnvironment(simulator)`. The one edit outside it, `private` → `fileprivate` on
+  `nfcCommand`, does not change what the function does.
+- The sources typecheck for both the Simulator and device targets, and a device build cannot see `SimulatedSensorPairingService`.
 
 ## How it was tested
 
@@ -45,6 +43,7 @@ Against libre2sim at its current state, which was itself checked against the Swi
 - `tools/bleharness` and `tools/cbharness`: real CoreBluetooth with the ImpossiBLE library, driving this repository's real
   `Libre2DirectTransmitter`: scan for FDE3, match `name == MAC` and `canSupportPeripheral`, connect, discover F001 and F002, the plugin's
   own unlock write, then packets reassembled from 20 + 20 + 6 bytes, with a valid CRC and a glucose value equal to the model.
+- `tools/cbharness` also ran libre2sim's scenarios for reconnecting, out of range, low glucose, end of wear and a new sensor.
 - Not yet run: a full Loop build in the Simulator. See the scenarios in libre2sim's `docs/scenarios.md`.
 
 ## Notes
