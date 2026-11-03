@@ -54,8 +54,8 @@ session should re-clone them (shallow is fine) into its own scratchpad.
 | M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, verified live through the pair harness | `0b3be5d` |
 | M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | ✅ done, verified live (see finding 8) | `f3a79e7` |
 | M4 | BLE: `impossible.go` (FDE3/F001/F002, advert name = MAC), `libre2/handler.go` (unlock check → 46-byte packet each minute as 20+20+6), packet builder, /disconnect /out-of-range /terminate /force-quit | ✅ done, verified (findings 11–13) | `4df02ef` |
-| M5 | Control API + faults (`/terminate`, `/out-of-range`, `/disconnect`, `/fault`), scenario checklist in Loop | ⏳ todo | — |
-| M6 | README, credits, LibreTransmitter PR text | ⏳ todo | — |
+| M5 | `/fault` (badcrc, short), web control panel, API test coverage, `docs/scenarios.md` checklist | 🔄 in progress (Sonnet subagent, combined with M6, started after `6167c74`). Live smoke on :8093 with `/tmp/l2s-m5.sock` | — |
+| M6 | README rewrite, `integration/LibreTransmitter/PR.md`, `docs/libre3sim-transport-fixes.md` | 🔄 in progress (same subagent as M5) | — |
 
 ## Verified findings (keep these; they're not obvious from the code)
 
@@ -143,5 +143,7 @@ iOS-Simulator executable and pairs against a live libre2sim. See its README. Sta
 3. Delegate M4 (Opus). Verify by decrypting the notified packets with the Swift `Libre2.decryptBLE` and
    `parseBLEData` (extend `tools/swiftvectors` or the harness) and checking that
    `mgdlForRaw(raw)` ≈ the modelled glucose. Then M5 and M6.
-4. A full Loop build in the Simulator (LoopWorkspace + ImpossiBLE) is the final end-to-end check. It
+4. After M5/M6: the orchestrator runs the `docs/scenarios.md` scenarios that cbharness can cover (reconnect with
+   unlock count 2, out-of-range, `/fault badcrc` → the plugin reports checksumValidationError, terminate) and fills in the marks.
+5. A full Loop build in the Simulator (LoopWorkspace + ImpossiBLE) is the final end-to-end check. It
    has not been attempted yet.
