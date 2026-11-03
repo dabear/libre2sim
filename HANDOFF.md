@@ -3,7 +3,7 @@
 Read this first if you are resuming the work. It records where things stand, what has been verified,
 and how to continue. Keep it updated after every milestone.
 
-**Last updated:** 2026-11-03, M2 verified and committed; M4 next.
+**Last updated:** 2026-11-03, M4 verified through real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; M5 next.
 
 ## Documents
 
@@ -53,7 +53,7 @@ session should re-clone them (shallow is fine) into its own scratchpad.
 | M1 | Crypto + CRC port (`libre2/crypto.go crc.go fram.go packet.go unlock.go`) + Swift golden vectors (`tools/swiftvectors`, `testdata/swift_vectors.json`) | ✅ done, verified | `be5ec61` |
 | M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, verified live through the pair harness | `0b3be5d` |
 | M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | ✅ done, verified live (see finding 8) | `f3a79e7` |
-| M4 | BLE: adapt `ref/libre3sim/impossible.go.txt` (service FDE3, F001 write, F002 notify, advert name = MAC), handler (unlock check → 46-byte packet each minute as 20+20+6), packet builder, /disconnect /out-of-range /terminate | 🔄 in progress (subagent, Opus, started after `8ab4e5e`). It uses its own socket and port 8092 under the scratchpad for its live smoke test | — |
+| M4 | BLE: `impossible.go` (FDE3/F001/F002, advert name = MAC), `libre2/handler.go` (unlock check → 46-byte packet each minute as 20+20+6), packet builder, /disconnect /out-of-range /terminate /force-quit | ✅ done, verified (findings 11–13) | `4df02ef` |
 | M5 | Control API + faults (`/terminate`, `/out-of-range`, `/disconnect`, `/fault`), scenario checklist in Loop | ⏳ todo | — |
 | M6 | README, credits, LibreTransmitter PR text | ⏳ todo | — |
 
@@ -95,6 +95,24 @@ session should re-clone them (shallow is fine) into its own scratchpad.
     0xB0 (not activated/ended; warmup allowed); re-enabling streaming resets UnlockCount; changing the
     glucose mode only affects future minutes (as in libre3sim).
 
+11. **M4 verified with bleharness** (LibreTransmitter's Swift crypto/parse over the socket protocol): two
+    consecutive packets as 20+20+6, CRC valid, age == lifeCount (180, 181), trend/history == the sine model.
+12. **M4 verified with cbharness: real CoreBluetooth + real ImpossiBLE dylib + LibreTransmitter's real
+    `Libre2DirectTransmitter`.** Pairing → scan for [FDE3] → didDiscover name == MAC, `canSupportPeripheral` true
+    → connect → F001 (props 8) and F002 (props 16) → the plugin writes its own unlock
+    (`2b000000…`, count 1) → didWrite OK → notify on → 2 packets via the plugin's 46-byte reassembly, CRC true,
+    glucose == model. Remaining unverified: a full Loop build (LoopWorkspace) and the real
+    LibreTransmitterProxyManager (it imports LoopKit).
+13. **Fixes M4 made to libre3sim's transport** (worth upstreaming to libre3sim): the held-app relaunch could never
+    fire (`c == nil` tested inside `c != nil`), and a link could be published before its handler existed. Also:
+    **macOS limits Unix socket paths to 104 bytes**, so long scratchpad paths fail with `bind: invalid argument`. Use
+    `/tmp/impossible-libre2.sock` or a relative path.
+14. M4 sim's choices: it advertises only when activated, not ended, streaming enabled over NFC, no link held,
+    and in range; any bad unlock means hang up; strict replay checking is opt-in (`-strict-unlock`); no
+    unlock within 60 s means hang up; packets stop on terminate or expiry; the nonce is a per-launch uint16
+    counter; F001 is listed before F002, so LibreTransmitter writes the unlock before subscribing, and both
+    orders work.
+
 ## Independent check harness (orchestrator-owned)
 
 **BLE harness (`tools/bleharness/`, for verifying M4):** a macOS Swift program built from LibreTransmitter's
@@ -103,11 +121,12 @@ real `PreLibre2.swift`, `CRC.swift`, `SensorData`, `GlucoseFromRaw` and the M3 `
 connect, discover, notify F002, write the real `Libre2.streamingUnlockPayload` to F001, reassemble the
 46 bytes, and run the real `decryptBLE`, `parseBLEData` and `calibratedGlucose`.
 
-**ImpossiBLE itself has not been built yet.** `simulator/build-impossible.sh` clones and compiles
-github.com/mickeyl/ImpossiBLE, and the auto-mode classifier denied that ("Code from External"). It
-needs the user's go-ahead, or the user can run `! sh simulator/build-impossible.sh` themselves. Until
-then, compatibility with the real ImpossiBLE dylib is unverified: the socket protocol is the one
-libre3sim implements.
+**ImpossiBLE is built.** The user approved running `simulator/build-impossible.sh`. The previous session's dylib was at
+`<scratchpad>/impbuild/libImpossiBLE.dylib`; rebuild it in a new session. The classifier blocks it by default
+("Code from External"), so ask the user.
+
+**cbharness (`tools/cbharness/`):** real CoreBluetooth with the real ImpossiBLE dylib injected, driving LibreTransmitter's
+real `Libre2DirectTransmitter` plugin. See its README.
 
 
 `tools/pairharness/` builds LibreTransmitter's **real** pairing code (with the M3 patch) as an
