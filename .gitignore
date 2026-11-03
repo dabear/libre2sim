@@ -1,0 +1,4 @@
+libre2sim
+/libre2state.json
+*.tmp
+simulator/build/
