@@ -67,9 +67,10 @@ Everything it does is also an HTTP call (see [Control API](#control-api); it lis
    For an older LibreTransmitter (such as `main`), apply
    [the same change as a patch](integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch) with
    `git am -3`.
-2. **Boot an iPhone Simulator, then start libre2sim** with `./start.sh`. It sets up the Bluetooth library inside the
-   running Simulator, so Loop needs no scheme changes, and prints what to do next. Ctrl-C stops libre2sim and removes
-   the setup again. (No Simulator running? It says so, and gives the one variable to add to the scheme instead.)
+2. **Start libre2sim** with `./start.sh`. If no Simulator is running it boots the newest iPhone one
+   (`LIBRE2SIM_SIMULATOR="iPhone 16"` picks another; `--no-boot` skips it) and opens its window. It sets up the
+   Bluetooth library inside the running Simulator, so Loop needs no scheme changes, and prints what to do next. Ctrl-C
+   stops libre2sim and removes the setup again.
 3. **Run Loop on that Simulator** from Xcode, as usual. In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
    goes to libre2sim, the app finds the sensor over (simulated) Bluetooth, and a reading arrives each minute.
 

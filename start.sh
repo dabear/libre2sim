@@ -6,6 +6,10 @@
 #   ./start.sh -fresh -age 0       a new sensor still in its applicator
 #   ./start.sh --no-impossible     skip building the ImpossiBLE library
 #   ./start.sh --no-inject         don't set up the running Simulator(s); set DYLD_INSERT_LIBRARIES yourself
+#   ./start.sh --no-boot           don't boot a Simulator when none is running
+#
+# With no Simulator running, it boots one (LIBRE2SIM_SIMULATOR names it; default: the newest
+# iPhone) and opens its window (DeviceHub in Xcode 27, Simulator.app before).
 #
 # The first run also builds the ImpossiBLE library that the app in the Simulator needs
 # (simulator/build/libImpossiBLE.dylib; it needs Xcode and network access), and rebuilds it
@@ -21,12 +25,13 @@
 set -e
 cd "$(dirname "$0")"
 
-impossible=auto inject=yes
+impossible=auto inject=yes boot=yes
 while :; do
 	case "$1" in
 	--no-impossible) impossible=no; shift ;;
 	--rebuild-impossible) impossible=yes; shift ;;
 	--no-inject) inject=no; shift ;;
+	--no-boot) boot=no; shift ;;
 	*) break ;;
 	esac
 done
@@ -67,10 +72,28 @@ for a in "$@"; do
 done
 
 # The booted Simulators, as "udid name" lines.
+listbooted() {
+	xcrun simctl list devices booted 2>/dev/null | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\2 \1/p'
+}
+if [ "$inject" = yes ] && [ "$boot" = yes ] && [ -f "$dylib" ] && command -v xcrun >/dev/null 2>&1 && [ -z "$(listbooted)" ]; then
+	pick=$(xcrun simctl list devices available 2>/dev/null |
+		sed -n 's/^ *\(iPhone[^(]*[^ (]\) (\([0-9A-F-]\{36\}\)) (Shutdown).*/\2 \1/p' |
+		if [ -n "$LIBRE2SIM_SIMULATOR" ]; then grep " $LIBRE2SIM_SIMULATOR\$" ; else cat; fi | tail -1)
+	if [ -n "$pick" ]; then
+		echo "Booting the Simulator ${pick#* }..."
+		xcrun simctl boot "${pick%% *}" && xcrun simctl bootstatus "${pick%% *}" >/dev/null 2>&1 || true
+	fi
+fi
+# Show the Simulator's window: DeviceHub in Xcode 27, Simulator.app before.
+if [ "$boot" = yes ] && command -v xcode-select >/dev/null 2>&1 && [ -n "$(listbooted)" ]; then
+	dev=$(xcode-select -p)
+	for app in "$dev/../Applications/DeviceHub.app" "$dev/Applications/Simulator.app"; do
+		[ -d "$app" ] && { open "$app"; break; }
+	done
+fi
 booted=
 if [ "$inject" = yes ] && [ -f "$dylib" ] && command -v xcrun >/dev/null 2>&1; then
-	booted=$(xcrun simctl list devices booted 2>/dev/null |
-		sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\2 \1/p')
+	booted=$(listbooted)
 fi
 setenv() { # udid
 	xcrun simctl spawn "$1" launchctl setenv DYLD_INSERT_LIBRARIES "$dylib"
