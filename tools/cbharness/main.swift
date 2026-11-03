@@ -9,6 +9,11 @@ import CoreBluetooth
 import Foundation
 
 let wantPackets = Int(ProcessInfo.processInfo.environment["PACKETS"] ?? "2") ?? 2
+// FOLLOW=1: on a drop, reconnect to the known peripheral as LibreTransmitterProxyManager does
+// (Libre2DirectTransmitter.requiresDelayedReconnect is false, so at once); the connect is held
+// until the sensor advertises again. TIMEOUT=s: give up after s seconds (default 150).
+let follow = ProcessInfo.processInfo.environment["FOLLOW"] == "1"
+let timeout = Double(ProcessInfo.processInfo.environment["TIMEOUT"] ?? "150") ?? 150
 var calibration: SensorData.CalibrationInfo!
 var bag = Set<AnyCancellable>()
 
@@ -49,7 +54,12 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        print("didDisconnect \(String(describing: error))")
+        print("didDisconnect \(String(describing: error)) after \(packets) packets")
+        guard follow else { return }
+        // as LibreTransmitterProxyManager.didDisconnectPeripheral → reconnect() → connect(advertisementData: nil)
+        plugin?.reset()
+        print("reconnecting")
+        central.connect(peripheral, options: nil)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -119,7 +129,7 @@ if ProcessInfo.processInfo.environment["RECONNECT"] == "1" {
     }
     print("reconnecting: mac \(mac) stored unlockCount \(UserDefaults.standard.preSelectedSensor?.unlockCount ?? -1)")
     central = Central(mac: mac)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 150) { print("RESULT: FAIL timeout"); exit(1) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { print("RESULT: FAIL timeout"); exit(1) }
     RunLoop.main.run()
 }
 let pairing = SimulatedSensorPairingService()
@@ -134,5 +144,5 @@ pairing.publisher.sink { info in
     central = Central(mac: mac)
 }.store(in: &bag)
 try pairing.pairSensor()
-DispatchQueue.main.asyncAfter(deadline: .now() + 150) { print("RESULT: FAIL timeout (packets \(central?.packets ?? 0))"); exit(1) }
+DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { print("RESULT: FAIL timeout (packets \(central?.packets ?? 0))"); exit(1) }
 RunLoop.main.run()

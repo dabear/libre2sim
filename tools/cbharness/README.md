@@ -41,3 +41,7 @@ Modes (env):
   bumps `unlockCount` on every connection.
 - `REPLAY=n` (with `RECONNECT=1`): rewind the stored count so the plugin sends count n again. Use it to
   check `-strict-unlock`.
+- `FOLLOW=1`: on a drop, reconnect to the known peripheral at once, as `LibreTransmitterProxyManager` does
+  (`requiresDelayedReconnect` is false for the Libre 2). Packets are counted across reconnects.
+- `TIMEOUT=s`: give up after s seconds (default 150). The harness prints `RESULT: FAIL timeout`, which is the
+  expected end for a run that checks that packets stop (terminate, expiry).

@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <b.inge@nightscoutfoundation.org>
+Date: Tue, 3 Nov 2026 10:45:38 +0100
+Subject: [PATCH] Forget a peripheral's owner before reporting its disconnect
+
+ImpossiBLE removed the peripheral's owning central after the app's
+didDisconnectPeripheral returned. An app that reconnects from that callback
+(LibreTransmitter does: Libre2DirectTransmitter.requiresDelayedReconnect is
+false) registers the owner again in connect, so the removal dropped the new
+owner. didConnect still arrived through the fallback to the first central,
+but didDiscoverServices, which needs the owner, was dropped silently: the
+app never discovered its characteristics, never wrote its unlock, and the
+sensor hung up a minute later, over and over.
+---
+ Sources/ImpossiBLE/CBSActivator.m | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/ImpossiBLE/CBSActivator.m b/Sources/ImpossiBLE/CBSActivator.m
+index 219855a..4c2bc08 100644
+--- a/Sources/ImpossiBLE/CBSActivator.m
++++ b/Sources/ImpossiBLE/CBSActivator.m
+@@ -983,13 +983,19 @@ static void cbs_handle_message(NSDictionary *msg) {
+         CFAbsoluteTime timestamp = [timestampNum respondsToSelector:@selector(doubleValue)] ? timestampNum.doubleValue : CFAbsoluteTimeGetCurrent();
+         BOOL isReconnecting = [isReconnectingNum respondsToSelector:@selector(boolValue)] ? isReconnectingNum.boolValue : NO;
+         dispatch_async(queue, ^{
++            // Forget the owner before telling the app, not after: an app that
++            // reconnects from didDisconnect (LibreTransmitter does) registers
++            // itself again in connect, and removing the owner afterwards would
++            // drop every later callback that looks the owner up.
++            if (![type isEqualToString:@"didConnect"]) {
++                [gPeripheralOwners removeObjectForKey:uuid];
++            }
+             if ([type isEqualToString:@"didConnect"] &&
+                 [delegate respondsToSelector:@selector(centralManager:didConnectPeripheral:)]) {
+                 [delegate centralManager:central didConnectPeripheral:cbPeripheral];
+             } else if ([type isEqualToString:@"didFailConnect"] &&
+                        [delegate respondsToSelector:@selector(centralManager:didFailToConnectPeripheral:error:)]) {
+                 [delegate centralManager:central didFailToConnectPeripheral:cbPeripheral error:err];
+-                [gPeripheralOwners removeObjectForKey:uuid];
+             } else if ([type isEqualToString:@"didDisconnect"] &&
+                        [delegate respondsToSelector:@selector(centralManager:didDisconnectPeripheral:timestamp:isReconnecting:error:)]) {
+                 [delegate centralManager:central
+@@ -997,11 +1003,9 @@ static void cbs_handle_message(NSDictionary *msg) {
+                                 timestamp:timestamp
+                            isReconnecting:isReconnecting
+                                     error:err];
+-                [gPeripheralOwners removeObjectForKey:uuid];
+             } else if ([type isEqualToString:@"didDisconnect"] &&
+                        [delegate respondsToSelector:@selector(centralManager:didDisconnectPeripheral:error:)]) {
+                 [delegate centralManager:central didDisconnectPeripheral:cbPeripheral error:err];
+-                [gPeripheralOwners removeObjectForKey:uuid];
+             }
+         });
+         return;
+-- 
+2.54.0 (Apple Git-157)
+

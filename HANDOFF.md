@@ -59,7 +59,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | `libre2/packet.go` | 46-byte BLE packet (7 trend + 3 history records), encryption, 20+20+6 notifies, one-shot faults |
 | `libre2/glucose.go glucose_tables.go` | Forward and **exact inverse** of LibreTransmitter's `GlucoseFromRaw` |
 | `libre2/state.go sensor.go nfc.go ble.go handler.go serial.go client.go` | Sensor model, NFC commands, BLE link handler (unlock check, streaming) |
-| `suspend/`, `simulator/` | From libre3sim: app suspension, and `build-impossible.sh` + 7 ImpossiBLE patches |
+| `suspend/`, `simulator/` | From libre3sim: app suspension, and `build-impossible.sh` + 8 ImpossiBLE patches (0008 is ours, finding 19) |
 | `ref/libre3sim/*.go.txt` | Verbatim libre3sim sources kept for reference (not compiled) |
 | `tools/swiftvectors/` | Swift program printing golden vectors from verbatim LibreTransmitter sources → `testdata/swift_vectors.json` |
 | `tools/pairharness/` | iOS-Simulator exe: LibreTransmitter's real pairing code vs a live libre2sim |
@@ -146,6 +146,17 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
       the buffer only on notify-state change or reconnect, so all later packets pile up unparsed. This is a real
       robustness bug (one lost notify on a real link does the same) and is worth an upstream issue.
 17. The M5 subagent made `/glucose` return 400 for unknown kinds; before, they silently fell back to sine.
+18. **Session 2, scenario 4 (cbharness):** `fixed 55` → minute 181 decodes to 55 through the real plugin; earlier minutes
+    stay at the old model (future minutes only), as designed.
+19. **ImpossiBLE bug, found by scenario 3, fixed by `simulator/impossible-patches/0008`:** ImpossiBLE removed
+    `gPeripheralOwners[uuid]` *after* calling the app's `didDisconnectPeripheral`. LibreTransmitter reconnects from inside
+    that callback (`requiresDelayedReconnect` false), so `connect` re-registered the owner and ImpossiBLE then deleted it.
+    `didConnect` still arrived (falls back to `gCentral`), but `didDiscoverServices` needs the owner and was dropped
+    silently → no characteristics, no unlock → libre2sim's 60 s unlock timeout hung up, forever. **Any drop in Loop
+    (`/disconnect`, out of range, terminate-reconnect) hit this before.** Patch 0008 removes the owner before calling the delegate.
+20. **Scenario 3 (cbharness `RECONNECT=1 FOLLOW=1`, with patch 0008):** out of range 2 min → didDisconnect, the app's
+    connect is held, no advertising for 2 min, then advertise → connect completes → unlock count 4 → minute 193 decoded.
+    cbharness got `FOLLOW=1` (reconnect in didDisconnect, as the proxy manager does) and `TIMEOUT=s`.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -153,8 +164,8 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 |---|---|---|---|
 | 1 | Pair + first readings | ✅ | not run |
 | 2 | Reconnect without rescan / strict unlock | ✅ | not run |
-| 3 | Out of range | not run | not run |
-| 4 | Low glucose (e.g. fixed 55) | not run | not run |
+| 3 | Out of range | ✅ (finding 20, needed patch 0008) | not run |
+| 4 | Low glucose (e.g. fixed 55) | ✅ (finding 18) | not run |
 | 5 | Expiry / terminate | not run | not run |
 | 6 | Faults (badcrc, short) | ✅ (finding 16) | not run |
 | 7 | New sensor | not run | not run |
@@ -221,4 +232,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
-| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. | in progress |
+| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. Scenarios 4, 3 pass; found+fixed ImpossiBLE owner bug (0008). | in progress: scenarios 5, 7 next |
