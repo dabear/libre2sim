@@ -113,6 +113,11 @@ session should re-clone them (shallow is fine) into its own scratchpad.
     counter; F001 is listed before F002, so LibreTransmitter writes the unlock before subscribing, and both
     orders work.
 
+15. **Reconnect and strict unlock, verified with cbharness** against `libre2sim -strict-unlock` built from `6167c74`:
+    pair (count 1) → `RECONNECT=1` (count 2) → `RECONNECT=1` (count 3); each got a packet with a valid CRC, and `/status`
+    unlockCount = 3. `RECONNECT=1 REPLAY=2` → the sim logged "hanging up: bad unlock: unlock count 2 replayed: the
+    last accepted was 3", the app got didDisconnect, and the sensor advertised again.
+
 ## Independent check harness (orchestrator-owned)
 
 **BLE harness (`tools/bleharness/`, for verifying M4):** a macOS Swift program built from LibreTransmitter's

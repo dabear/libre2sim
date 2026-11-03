@@ -34,3 +34,10 @@ Run (libre2sim on `/tmp/impossible-libre2.sock`; dylib from `simulator/build-imp
 SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/path/libImpossiBLE.dylib SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock \
 SIMCTL_CHILD_PACKETS=2 xcrun simctl spawn "iPhone 16" /tmp/cbharness
 ```
+
+Modes (env):
+- `PACKETS=n`: packets to wait for (default 2).
+- `RECONNECT=1`: skip NFC and reuse the stored Sensor, as LibreTransmitter does for a known sensor. The plugin
+  bumps `unlockCount` on every connection.
+- `REPLAY=n` (with `RECONNECT=1`): rewind the stored count so the plugin sends count n again. Use it to
+  check `-strict-unlock`.

@@ -105,6 +105,23 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
 }
 
 var central: Central?
+// RECONNECT=1: skip NFC and reuse the stored Sensor, as LibreTransmitter does when it
+// reconnects to a known sensor (the plugin bumps unlockCount for every connection).
+if ProcessInfo.processInfo.environment["RECONNECT"] == "1" {
+    guard let sensor = UserDefaults.standard.preSelectedSensor, let mac = sensor.macAddress,
+          let fram = UserDefaults.standard.data(forKey: "cbharness.fram"), let sd = SensorData(bytes: [UInt8](fram)) else {
+        print("RESULT: FAIL no stored sensor; run once without RECONNECT"); exit(1)
+    }
+    calibration = sd.calibrationData
+    // REPLAY=n rewinds the stored count so the plugin sends count n again (strict mode must refuse it).
+    if let n = Int(ProcessInfo.processInfo.environment["REPLAY"] ?? "") {
+        var s = sensor; s.unlockCount = n - 1; UserDefaults.standard.preSelectedSensor = s
+    }
+    print("reconnecting: mac \(mac) stored unlockCount \(UserDefaults.standard.preSelectedSensor?.unlockCount ?? -1)")
+    central = Central(mac: mac)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 150) { print("RESULT: FAIL timeout"); exit(1) }
+    RunLoop.main.run()
+}
 let pairing = SimulatedSensorPairingService()
 pairing.onCancel = { print("RESULT: FAIL pairing"); exit(1) }
 pairing.publisher.sink { info in
@@ -112,6 +129,7 @@ pairing.publisher.sink { info in
     calibration = sd.calibrationData
     // as Libre2DirectSetup does after a scan
     UserDefaults.standard.preSelectedSensor = Sensor(uuid: info.uuid, patchInfo: info.patchInfo, maxAge: sd.maxMinutesWearTime, sensorName: info.sensorName, macAddress: mac)
+    UserDefaults.standard.set(info.fram, forKey: "cbharness.fram")
     print("paired: mac \(mac) state \(sd.state.description) age \(sd.minutesSinceStart)")
     central = Central(mac: mac)
 }.store(in: &bag)
