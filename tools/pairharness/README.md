@@ -7,8 +7,8 @@ prints what LibreTransmitter would store: UID, patch info, MAC, FRAM CRC validit
 serial and calibration.
 
 ```bash
-# 1. LibreTransmitter @ 4110512 with the patch applied
-git clone https://github.com/LoopKit/LibreTransmitter /tmp/lt && cd /tmp/lt && git checkout 4110512
+# 1. LibreTransmitter next-dev (f3e232e) with the patch applied
+git clone -b next-dev https://github.com/LoopKit/LibreTransmitter /tmp/lt && cd /tmp/lt
 git am /Users/bjorninge/Code/libre2sim/integration/LibreTransmitter/0001-*.patch
 
 # 2. build (the file list avoids LoopKit/UIKit; -swift-version 5 avoids a 6.x type-checker timeout)

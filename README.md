@@ -57,7 +57,7 @@ The Simulator has no NFC. LibreTransmitter's pairing therefore needs a small pat
 talks to libre2sim's `/nfc` endpoint in place of CoreNFC, and device builds are unchanged.
 
 ```bash
-# 1. Patch LibreTransmitter (the copy in LoopWorkspace; the patch is made against 4110512)
+# 1. Patch LibreTransmitter (the copy in LoopWorkspace; the patch is made against next-dev @ f3e232e and applies to main too)
 cd LoopWorkspace/LibreTransmitter
 git am /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
 

@@ -55,8 +55,8 @@ pairing code and `Libre2DirectTransmitter` plugin. It's the quickest way to see 
 W=/tmp/l2work; mkdir -p $W            # any scratch directory
 
 # LibreTransmitter with the integration patch
-git clone https://github.com/LoopKit/LibreTransmitter $W/LT && git -C $W/LT checkout 4110512
-git -C $W/LT am /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
+git clone -b next-dev https://github.com/LoopKit/LibreTransmitter $W/LT
+git -C $W/LT am -3 /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
 
 # The ImpossiBLE library (clones ImpossiBLE at a pinned commit and applies simulator/impossible-patches)
 sh /path/to/libre2sim/simulator/build-impossible.sh $W/imp      # → $W/imp/libImpossiBLE.dylib
@@ -77,8 +77,8 @@ and [scenarios.md](scenarios.md).
 ## 3. In Loop, in the iOS Simulator
 
 ```bash
-# 1. Patch the LibreTransmitter inside your LoopWorkspace checkout (the patch is made against 4110512;
-#    use `git am -3` if your LibreTransmitter is at another commit)
+# 1. Patch the LibreTransmitter inside your LoopWorkspace checkout. The patch is made against LibreTransmitter next-dev
+#    (f3e232e, what LoopWorkspace next-dev pins) and also applies to main (4110512, LoopWorkspace dev) with `git am -3`.
 cd LoopWorkspace/LibreTransmitter
 git am /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
 

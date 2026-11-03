@@ -15,7 +15,7 @@ LibreTransmitter's **real `Libre2DirectTransmitter` plugin**:
 `Stubs.swift` stands in for the LoopKit-only types (`DeviceLogEntryType`, `BluetoothmanagerState`,
 `LibreTransmitterDelegate`, `UserDefaults.optionalBool`).
 
-Build: in LibreTransmitter @4110512 with the integration patch applied:
+Build: in LibreTransmitter (next-dev @ f3e232e, or main @ 4110512) with the integration patch applied:
 
 ```bash
 H=/Users/bjorninge/Code/libre2sim/tools/cbharness

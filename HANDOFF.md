@@ -46,7 +46,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | `docs/running.md` | Step-by-step run notes (standalone, cbharness, Loop) and troubleshooting (session 2) |
 | `docs/scenarios.md` | 8 manual scenarios with curl commands and expected results; verification marks per scenario |
 | `docs/libre3sim-transport-fixes.md` | Two transport bugs found in libre3sim, with diffs (for upstreaming) |
-| `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | The LibreTransmitter patch (against `4110512`); minimal 3-file version since session 2 (finding 23) |
+| `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | The LibreTransmitter patch, against `next-dev` f3e232e (applies to main with -3); own file since session 2 (finding 29) |
 | `integration/LibreTransmitter/PR.md` | Ready-to-paste PR description for that patch |
 
 ## 3. Code map
@@ -195,6 +195,15 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     LibreTransmitter gets packets with empty trend/history; after ending at minute 12, a reconnect decoded 13…20 = 110 mg/dL.
     Gotchas: a shell `wait` after starting libre2sim with `&` waits on libre2sim forever; a `/new` re-exec'd libre2sim has no
     `-fresh` in its args, so `pkill -f "libre2sim -fresh"` misses it (kill by port: `lsof -iTCP:8081`).
+29. **Patch now targets LibreTransmitter `next-dev` (f3e232e), with its own file (user asked both):** LoopWorkspace `next-dev`
+    pins LT f3e232e; LoopWorkspace `dev` pins LT `main` 4110512. The patch also applies to `main` with `git am -3`. On next-dev the
+    ported files (PreLibre2, CRC, GlucoseFromRaw, proxy manager) are unchanged; Libre2DirectTransmitter differs by one print.
+    Layout: new `SimulatedSensorPairingService.swift` (all `#if simulator`, registered in the LibreTransmitter target: 4 pbxproj
+    lines), `nfcCommand` private→fileprivate, a sim-only `SensorPairingService.enableStreamingCommand` extension in the same file,
+    plus the 2 hooks. **Tried and rejected:** making nfcCommand/NFCCommand/Subcommand `internal` changes the device object
+    everywhere (linkage/layout), so devicecheck could no longer prove identity. With the extension: devicecheck = 16 bytes of
+    `__swift_modhash` only. Verified: xcodebuild -list parses, device typecheck + negative control, cbharness and pairharness OK.
+    The LT branch `libre2_plus_eu` (2024, one line: 0xC6 → libre2) is stale; main/next-dev already have it (plus 0x7F).
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -228,13 +237,13 @@ Use your own session scratchpad (`$S` below). Keep socket paths short (see §5).
 
 ```bash
 # Reference repos (read-only)
-git clone https://github.com/LoopKit/LibreTransmitter $S/LibreTransmitter && git -C $S/LibreTransmitter checkout 4110512
+git clone https://github.com/LoopKit/LibreTransmitter $S/LibreTransmitter   # main 4110512, next-dev f3e232e
 git clone https://github.com/LoopKit/libre3sim $S/libre3sim            # ccd9a91
 git clone https://github.com/LoopKit/LibreLoop $S/LibreLoop            # 3100b98 (pattern for the NFC hook)
 git clone https://github.com/airedev326/RoundWhiteDiscKit $S/RWDK      # 7dd6396 (Libre 3 background only)
 
 # LibreTransmitter with the patch (needed by all harnesses)
-cp -R $S/LibreTransmitter $S/LT-work && cd $S/LT-work && git checkout -b simulator-libre2sim \
+cp -R $S/LibreTransmitter $S/LT-work && cd $S/LT-work && git checkout -b simulator-libre2sim origin/next-dev \
   && git am /Users/bjorninge/Code/libre2sim/integration/LibreTransmitter/0001-*.patch
 
 # ImpossiBLE dylib (needs the user's OK; see §5)

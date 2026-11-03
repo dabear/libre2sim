@@ -3,18 +3,19 @@
 ## What
 
 Libre 2 pairing in the iOS Simulator, against libre2sim, an emulator of a Libre 2 sensor for
-development. The change is three small edits, all inert on a device:
+development. Made against `next-dev` (it also applies to `main`). Everything new is in one file; the edits to existing
+files are small and inert on a device:
 
-- `SensorPairingService.swift`: at the end of the file, inside `#if targetEnvironment(simulator)`,
-  `SimulatedSensorPairingService`, a `SensorPairingProtocol` that asks libre2sim's HTTP API the questions
-  `SensorPairingService` asks over CoreNFC (tag identifier, system info, patch info `A1`, 43 blocks of FRAM in requests of 3,
-  then enable streaming), in the same order, and puts the answers through the same checks. It reads `LIBRE2SIM_URL`, default
-  `http://127.0.0.1:8081`. The enable-streaming command is built by `SensorPairingService`'s own `nfcCommand`, so the two
-  cannot drift apart. That method goes from `private` to `fileprivate`; this is the only change to existing code.
+- **New:** `LibreSensor/SensorPairing/SimulatedSensorPairingService.swift`, entirely inside `#if targetEnvironment(simulator)`.
+  A `SensorPairingProtocol` that asks libre2sim's HTTP API the questions `SensorPairingService` asks over CoreNFC (tag
+  identifier, system info, patch info `A1`, 43 blocks of FRAM in requests of 3, then enable streaming), in the same order, and
+  puts the answers through the same checks. It reads `LIBRE2SIM_URL`, default `http://127.0.0.1:8081`. Registered in the
+  `LibreTransmitter` target next to `SensorPairingService.swift`.
+- `SensorPairingService.swift`: `nfcCommand` goes from `private` to `fileprivate`, and a Simulator-only extension at the end of
+  the file, `SensorPairingService.enableStreamingCommand(…)`, hands the new file the command bytes from that same function, so
+  the Simulator and CoreNFC paths cannot drift apart.
 - `LibreTransmitterManagerV3.pairingService` returns the simulated service on the Simulator.
 - `Features.phoneNFCAvailable` is `true` on the Simulator, so the pairing UI offers a scan.
-
-No new files, so the Xcode project is unchanged.
 
 ## Why
 
@@ -36,11 +37,12 @@ repeatable, and lets a change to this code be tested without a sensor.
 
 ## How it was tested
 
-Against libre2sim at its current state, which was itself checked against the Swift in this repository (LibreTransmitter @ `4110512`):
+Against libre2sim at its current state, which was itself checked against the Swift in this repository (`main` @ `4110512`; the
+files it ports are the same on `next-dev`):
 
 - The libre2sim Go port of `PreLibre2`, the FRAM CRCs and the BLE packet cipher reproduces golden vectors printed by this
   repository's own Swift (`tools/swiftvectors`, copies of `PreLibre2.swift` and `CRC.swift`), byte for byte.
-- `tools/pairharness`: this repository's real pairing code, with this patch applied, built as an iOS Simulator binary, pairs with a
+- `tools/pairharness`: this repository's real pairing code (`next-dev`), with this patch applied, built as an iOS Simulator binary, pairs with a
   live libre2sim: the FRAM CRCs are valid, the state is "ready", the sensor age is right, the MAC equals the advertised name, and the
   FRAM trend decodes through `GlucoseFromRaw` to the value libre2sim modelled.
 - `tools/bleharness` and `tools/cbharness`: real CoreBluetooth with the ImpossiBLE library, driving this repository's real
