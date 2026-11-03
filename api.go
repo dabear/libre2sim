@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"libre2sim/libre2"
@@ -20,6 +24,13 @@ import (
 //	GET  /                       the control panel (web.go)
 //	GET  /status                 the sensor and its latest reading; "fault" is
 //	                             there while a fault is armed
+//	GET  /readings?minutes=60    the latest readings (mg/dL by minute, oldest
+//	                             first) with the next reading and the trend
+//	GET  /events?since=<seq>     the event log, oldest first: {"last":seq,
+//	                             "events":[{seq,time,cat,kind,msg}]}
+//	GET  /config                 the launch configuration and the sensor's identity
+//	POST /config      {"strictUnlock":true}
+//	                             change a setting that is safe at run time
 //	POST /glucose     {"kind":"fixed","value":65}
 //	                  {"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}
 //	                  {"kind":"walk","value":140}
@@ -60,7 +71,27 @@ type api struct {
 	radio *SimRadio
 	// replace swaps in a new sensor; nil disables POST /new.
 	replace func(sensorConfig)
-	mux     *http.ServeMux
+	// launch is how libre2sim was started, for GET /config.
+	launch launchConfig
+	mux    *http.ServeMux
+}
+
+// launchConfig is how libre2sim was launched (the flags), shown read-only by
+// GET /config. strictUnlock is the exception, read from the sensor: it can
+// change at run time.
+type launchConfig struct {
+	Version       string  `json:"version"`
+	StatePath     string  `json:"statePath"`
+	API           string  `json:"api"`
+	Socket        string  `json:"socket"`
+	Fresh         bool    `json:"fresh"`
+	Days          int     `json:"days"`
+	WarmupMinutes float64 `json:"warmupMinutes"`
+	AgeMinutes    float64 `json:"ageMinutes"`
+	Simulator     string  `json:"simulator"`
+	Relaunch      bool    `json:"relaunch"`
+	Suspend       bool    `json:"suspend"`
+	Dylib         string  `json:"dylib"`
 }
 
 func newAPI(sensor *libre2.Sensor) *api {
@@ -75,6 +106,41 @@ func newAPI(sensor *libre2.Sensor) *api {
 	})
 	a.mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, sensor.Status())
+	})
+	a.mux.HandleFunc("/readings", func(w http.ResponseWriter, r *http.Request) {
+		minutes, err := strconv.Atoi(r.URL.Query().Get("minutes"))
+		if err != nil || minutes < 1 {
+			minutes = 60
+		}
+		if minutes > 1440 {
+			minutes = 1440
+		}
+		writeJSON(w, sensor.History(minutes, time.Now()))
+	})
+	a.mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
+		events, last := sensor.Events().Since(since)
+		writeJSON(w, map[string]interface{}{"last": last, "events": events})
+	})
+	a.mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+		case http.MethodPost:
+			var req struct {
+				StrictUnlock *bool `json:"strictUnlock"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.StrictUnlock == nil {
+				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false}`, 0)
+				return
+			}
+			sensor.SetStrictUnlock(*req.StrictUnlock)
+			log.Printf("strict unlock now %v", *req.StrictUnlock)
+			sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "GET or POST /config", 0)
+			return
+		}
+		writeJSON(w, a.config())
 	})
 	a.post("/glucose", func(w http.ResponseWriter, r *http.Request) {
 		var m libre2.GlucoseMode
@@ -163,6 +229,7 @@ func newAPI(sensor *libre2.Sensor) *api {
 			writeError(w, http.StatusBadRequest, err.Error(), 0)
 			return
 		}
+		sensor.Events().Add(libre2.CatSensor, "new-sensor", "new sensor requested (wearDays %d, age %g min); libre2sim restarts and this log starts over", c.WearDays, c.AgeMinutes)
 		writeJSON(w, map[string]string{"status": "restarting with a new sensor"})
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -171,6 +238,27 @@ func newAPI(sensor *libre2.Sensor) *api {
 	})
 	a.post("/nfc", a.nfc)
 	return a
+}
+
+// config is GET /config: {"launch":{…},"sensor":{…}}.
+func (a *api) config() map[string]interface{} {
+	st := a.sensor.Status()
+	sensor := map[string]interface{}{}
+	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration",
+		"wearMinutes", "warmupMinutes", "activated", "streamingCode"} {
+		if v, ok := st[k]; ok {
+			sensor[k] = v
+		}
+	}
+	launch := a.launch
+	if launch.Version == "" {
+		launch.Version = "dev"
+	}
+	return map[string]interface{}{
+		"launch":       launch,
+		"strictUnlock": a.sensor.StrictUnlock(),
+		"sensor":       sensor,
+	}
 }
 
 func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) { a.mux.ServeHTTP(w, r) }
@@ -188,8 +276,70 @@ func (a *api) nfc(w http.ResponseWriter, r *http.Request) {
 	var req nfcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad NFC request: "+err.Error(), 0)
+		a.sensor.Events().Add(libre2.CatNFC, "bad-request", "bad NFC request: %v", err)
 		return
 	}
+	ev := a.sensor.Events()
+	ev.Add(libre2.CatNFC, "request", "%s", req.describe())
+	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
+	a.nfcOp(rec, req)
+	ev.Add(libre2.CatNFC, "response", "%s", rec.describe())
+}
+
+// describe is the request as the event log shows it.
+func (req nfcRequest) describe() string {
+	switch req.Op {
+	case "readBlocks":
+		return fmt.Sprintf("readBlocks first=%d count=%d", req.First, req.Count)
+	case "custom":
+		if req.Code != nil {
+			return fmt.Sprintf("custom code=0x%02x parameters=%s", *req.Code, req.Parameters)
+		}
+	}
+	return req.Op
+}
+
+// recorder keeps what a handler answers, for the event log.
+type recorder struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (r *recorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *recorder) Write(b []byte) (int, error) {
+	r.body.Write(b)
+	return r.ResponseWriter.Write(b)
+}
+
+// describe is the NFC answer as the event log shows it: the hex, or the
+// error and its code.
+func (r *recorder) describe() string {
+	var m struct {
+		Response *string  `json:"response"`
+		Blocks   []string `json:"blocks"`
+		Error    string   `json:"error"`
+		Code     int      `json:"code"`
+	}
+	json.Unmarshal(r.body.Bytes(), &m)
+	switch {
+	case r.status != http.StatusOK:
+		return fmt.Sprintf("HTTP %d, NFC error code %d (0x%02x): %s", r.status, m.Code, m.Code, m.Error)
+	case m.Blocks != nil:
+		return fmt.Sprintf("%d blocks: %s", len(m.Blocks), strings.Join(m.Blocks, ""))
+	case m.Response != nil && *m.Response == "":
+		return "ok, empty response"
+	case m.Response != nil:
+		return "ok: " + *m.Response
+	}
+	return "ok"
+}
+
+func (a *api) nfcOp(w http.ResponseWriter, req nfcRequest) {
 	switch req.Op {
 	case "identifier":
 		id := a.sensor.NFCIdentifier()

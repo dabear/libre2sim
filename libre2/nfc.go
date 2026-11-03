@@ -116,6 +116,7 @@ func (s *Sensor) NFCCustom(code byte, params []byte, now time.Time) ([]byte, err
 		st.UnlockCount = 0
 		s.save()
 		log.Printf("NFC: streaming enabled with code %d; BLE name %s", unlock, st.AdvertisedName())
+		s.events.Add(CatNFC, "streaming-enabled", "streaming enabled with code %d; BLE name %s", unlock, st.AdvertisedName())
 		return st.macLE(), nil
 
 	default:

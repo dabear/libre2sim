@@ -170,6 +170,13 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     **device typecheck (exit 0)**, a negative control (device build can't see the simulated class), and pairharness,
     bleharness and cbharness all `RESULT: OK` live. bleharness now builds the enable command itself from the real
     `Libre2.usefulFunction` (Libre2NFC is gone); libre2sim's `d` check accepted it.
+24. **Control panel v2 (Sonnet subagent, verified):** current + next reading with countdown, 60-min SVG chart, event log
+    (`GET /events?since=`, 200-entry ring in `libre2/events.go`, NFC hex in/out, BLE, sensor), `GET /readings`, `GET/POST /config`
+    (strictUnlock is the only live-editable setting; `/new` now carries its current value). `/status` only gained fields.
+    Next reading: exact for fixed/sine (`model(lc+1)`), the mean for walk (`estimate: true`, never draws randomness).
+    Orchestrator check: gofmt/vet/`test -race` clean; diff read; live with cbharness: `/status` predicted minute 181 = 80 mg/dL,
+    the real plugin decoded 181:80; `/events` held the whole NFC exchange, enable-streaming, connect, unlock, 2 packets,
+    disconnect. The page was **not** looked at in a browser (only that it serves and has no external assets).
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 

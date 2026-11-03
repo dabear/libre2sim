@@ -115,10 +115,14 @@ func (h *handler) write(c Char, b []byte) {
 	now := h.t.now()
 	n, err := h.s.unlock(b, now)
 	if err != nil {
+		k := h.s.unlockResult(false)
+		h.s.events.Add(CatBLE, "unlock-refused", "unlock refused (%d so far): %v", k, err)
 		h.hangUp("bad unlock: " + err.Error())
 		return
 	}
 	log.Printf("%s unlocked streaming with count %d", h.link.Addr(), n)
+	k := h.s.unlockResult(true)
+	h.s.events.Add(CatBLE, "unlock-accepted", "unlock accepted, count %d (%d so far)", n, k)
 	h.streaming = true
 	h.sent = -1
 	h.send(now)
@@ -166,6 +170,7 @@ func (h *handler) send(now time.Time) {
 		}
 	}
 	log.Printf("%s sent the packet for minute %d", h.link.Addr(), lc)
+	h.s.events.Add(CatBLE, "packet", "packet sent for minute %d: %d mg/dL", lc, h.s.Reading(lc))
 }
 
 func (h *handler) hangUp(why string) {
@@ -174,6 +179,7 @@ func (h *handler) hangUp(why string) {
 	}
 	h.done = true
 	log.Printf("%s hanging up: %s", h.link.Addr(), why)
+	h.s.events.Add(CatBLE, "hang-up", "sensor hangs up: %s", why)
 	h.link.Close()
 	h.Closed()
 }

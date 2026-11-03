@@ -573,6 +573,7 @@ func (r *SimRadio) tryConnect(now time.Time) {
 	r.mu.Unlock()
 
 	log.Printf("%s connected", l.addr)
+	r.sensor.Events().Add(libre2.CatBLE, "connect", "%s connected", l.addr)
 	c.send(map[string]interface{}{"type": "didConnect", "id": r.id})
 }
 
@@ -716,6 +717,7 @@ func (l *simLink) end(tell bool) {
 	l.ended = true
 	l.mu.Unlock()
 	log.Printf("%s disconnected", l.addr)
+	l.radio.sensor.Events().Add(libre2.CatBLE, "disconnect", "%s disconnected", l.addr)
 	if l.handler != nil {
 		l.handler.Closed()
 	}

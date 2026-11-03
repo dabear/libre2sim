@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -32,6 +33,30 @@ func (c sensorConfig) state() (*libre2.State, error) {
 		warmup = time.Duration(*c.WarmupMinutes * float64(time.Minute))
 	}
 	return libre2.NewState(c.WearDays, warmup, time.Duration(c.AgeMinutes*float64(time.Minute)))
+}
+
+// version is the VCS revision libre2sim was built from, or "dev".
+func version() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		rev, dirty := "", ""
+		for _, kv := range bi.Settings {
+			switch kv.Key {
+			case "vcs.revision":
+				rev = kv.Value
+			case "vcs.modified":
+				if kv.Value == "true" {
+					dirty = "+dirty"
+				}
+			}
+		}
+		if len(rev) > 7 {
+			rev = rev[:7]
+		}
+		if rev != "" {
+			return rev + dirty
+		}
+	}
+	return "dev"
 }
 
 func main() {
@@ -120,13 +145,16 @@ func main() {
 		}
 		log.Printf("restarting as the new sensor")
 		args := []string{exe, "-state", *statePath, "-api", *apiAddr, "-socket", *socket,
-			"-strict-unlock=" + strconv.FormatBool(*strictUnlock), "-simulator", *simulator,
+			"-strict-unlock=" + strconv.FormatBool(sensor.StrictUnlock()), "-simulator", *simulator,
 			"-relaunch=" + strconv.FormatBool(*relaunch), "-suspend=" + strconv.FormatBool(*suspendApp),
 			"-dylib", *dylib}
 		log.Fatalf("restarting: %v", syscall.Exec(exe, args, os.Environ()))
 	}
 
 	a := newAPI(sensor)
+	a.launch = launchConfig{Version: version(), StatePath: *statePath, API: *apiAddr, Socket: *socket, Fresh: *fresh,
+		Days: *days, WarmupMinutes: warmup.Minutes(), AgeMinutes: age.Minutes(), Simulator: *simulator,
+		Relaunch: *relaunch, Suspend: *suspendApp, Dylib: *dylib}
 	a.radio = radio
 	a.replace = replace
 	go func() {

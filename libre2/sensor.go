@@ -28,11 +28,18 @@ type Sensor struct {
 	strictUnlock bool      // refuse unlock counts at or below UnlockCount
 	nonce        uint16    // the last packet's n0 n1
 	fault        string    // armed for the next packet only (see notifies); "" for none
+
+	events                          *EventLog
+	unlocksAccepted, unlocksRefused int  // BLE unlocks since launch
+	expiryLogged                    bool // the worn-out event was recorded
 }
 
 func NewSensor(state *State, path string) *Sensor {
-	return &Sensor{state: state, path: path, lastSaved: -1}
+	return &Sensor{state: state, path: path, lastSaved: -1, events: NewEventLog(DefaultEventCap)}
 }
+
+// Events is the sensor's event log: what the control panel's log shows.
+func (s *Sensor) Events() *EventLog { return s.events }
 
 func (s *Sensor) Serial() string {
 	s.mu.Lock()
@@ -83,6 +90,10 @@ func (s *Sensor) Tick(now time.Time) int {
 		s.lastSaved = lc
 		s.save()
 	}
+	if s.state.Activated != nil && s.state.Terminated == nil && lc >= s.state.WearMinutes && !s.expiryLogged {
+		s.expiryLogged = true
+		s.events.Add(CatSensor, "expired", "the sensor is worn out (%d minutes)", s.state.WearMinutes)
+	}
 	return lc
 }
 
@@ -98,6 +109,7 @@ func (s *Sensor) Activate(now time.Time) error {
 	s.state.Activated = &at
 	s.lastSaved = -1
 	s.changed()
+	s.events.Add(CatSensor, "activated", "activated at %s", at.Format(time.RFC3339))
 	return nil
 }
 
@@ -110,6 +122,7 @@ func (s *Sensor) Terminate(now time.Time) {
 		s.state.Terminated = &Termination{LifeCount: uint16(s.state.framMinutes(now))}
 	}
 	s.changed()
+	s.events.Add(CatSensor, "terminated", "terminated at minute %d", s.state.Terminated.LifeCount)
 }
 
 func (s *Sensor) SetGlucoseMode(m GlucoseMode) {
@@ -117,6 +130,7 @@ func (s *Sensor) SetGlucoseMode(m GlucoseMode) {
 	defer s.mu.Unlock()
 	s.state.Glucose = m
 	s.changed()
+	s.events.Add(CatSensor, "glucose-mode", "glucose mode now %s (amplitude %g, period %g min)", m, m.Amplitude, m.PeriodMinutes)
 }
 
 func (s *Sensor) Status() map[string]interface{} {
@@ -140,6 +154,14 @@ func (s *Sensor) Status() map[string]interface{} {
 		"connected":        s.links > 0,
 		"advertising":      s.advertising(now),
 		"strictUnlock":     s.strictUnlock,
+		"unlocksAccepted":  s.unlocksAccepted,
+		"unlocksRefused":   s.unlocksRefused,
+	}
+	if n := s.nextReading(now); n != nil {
+		out["nextReading"] = n
+	}
+	if t := s.trend(now); t != nil {
+		out["trend"] = t
 	}
 	if now.Before(s.outOfRange) {
 		out["outOfRangeUntil"] = s.outOfRange.Format(time.RFC3339)
@@ -163,4 +185,30 @@ func (s *Sensor) Status() map[string]interface{} {
 		out["terminated"] = st.Terminated
 	}
 	return out
+}
+
+// Reading is the made-up glucose in mg/dL for life count lc; 0 for none.
+func (s *Sensor) Reading(lc int) uint16 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.reading(lc)
+}
+
+// StrictUnlock is whether the sensor refuses replayed unlock counts.
+func (s *Sensor) StrictUnlock() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.strictUnlock
+}
+
+// unlockResult counts a BLE unlock, accepted or refused.
+func (s *Sensor) unlockResult(ok bool) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ok {
+		s.unlocksAccepted++
+		return s.unlocksAccepted
+	}
+	s.unlocksRefused++
+	return s.unlocksRefused
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -417,5 +418,174 @@ func TestMethodsOverHTTP(t *testing.T) {
 	}
 	if s, _ := call(t, srv, "POST", "/nfc", `{`); s != http.StatusBadRequest {
 		t.Errorf("/nfc with bad JSON: HTTP %d", s)
+	}
+}
+
+func get(t *testing.T, srv *httptest.Server, path string, reply interface{}) int {
+	t.Helper()
+	resp, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(reply); err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	return resp.StatusCode
+}
+
+type eventsReply struct {
+	Last   uint64         `json:"last"`
+	Events []libre2.Event `json:"events"`
+}
+
+// Every /nfc request and its answer, an NFC error included, is logged, and
+// /events?since= returns only what is new.
+func TestEventsOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	nfc(t, srv, map[string]interface{}{"op": "identifier"})
+	var blocks struct {
+		Blocks []string `json:"blocks"`
+	}
+	if s := post(t, srv, map[string]interface{}{"op": "readBlocks", "first": 0, "count": 3}, &blocks); s != http.StatusOK || len(blocks.Blocks) != 3 {
+		t.Fatalf("readBlocks: HTTP %d, %v", s, blocks)
+	}
+	var e errorReply
+	if s := post(t, srv, map[string]interface{}{"op": "readBlocks", "first": 40, "count": 9}, &e); s != http.StatusUnprocessableEntity {
+		t.Fatalf("HTTP %d", s)
+	}
+	call(t, srv, "POST", "/glucose", `{"kind":"fixed","value":99}`)
+	call(t, srv, "POST", "/fault", `{"kind":"short"}`)
+
+	var r eventsReply
+	if s := get(t, srv, "/events", &r); s != http.StatusOK {
+		t.Fatalf("GET /events: HTTP %d", s)
+	}
+	var msgs []string
+	for i, ev := range r.Events {
+		if ev.Seq != uint64(i+1) || ev.Time.IsZero() {
+			t.Errorf("event %d: %+v", i, ev)
+		}
+		msgs = append(msgs, ev.Cat+"/"+ev.Kind+": "+ev.Msg)
+	}
+	all := strings.Join(msgs, "\n")
+	id := hex.EncodeToString(sensor.NFCIdentifier())
+	for _, want := range []string{
+		"nfc/request: identifier", "nfc/response: ok: " + id,
+		"nfc/request: readBlocks first=0 count=3", "nfc/response: 3 blocks: ",
+		"nfc/response: HTTP 422, NFC error code 16 (0x10)",
+		"sensor/glucose-mode: glucose mode now fixed 99", "sensor/fault-armed: fault short armed",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no event %q in\n%s", want, all)
+		}
+	}
+	if r.Last != uint64(len(r.Events)) {
+		t.Errorf("last %d for %d events", r.Last, len(r.Events))
+	}
+	var r2 eventsReply
+	get(t, srv, "/events?since="+strconv.FormatUint(r.Last-1, 10), &r2)
+	if len(r2.Events) != 1 || r2.Events[0].Seq != r.Last {
+		t.Errorf("since last-1: %+v", r2)
+	}
+	get(t, srv, "/events?since="+strconv.FormatUint(r.Last, 10), &r2)
+	if r2.Events == nil || len(r2.Events) != 0 {
+		t.Errorf("since last: %+v, want an empty list", r2.Events)
+	}
+}
+
+func TestNFCCustomEventsOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	uid := reverse(nfc(t, srv, map[string]interface{}{"op": "identifier"}))
+	info := nfc(t, srv, map[string]interface{}{"op": "custom", "code": 0xa1, "parameters": ""})
+	code, params := libre2.EnableStreamingCommand(uid, info, 424242)
+	nfc(t, srv, map[string]interface{}{"op": "custom", "code": int(code), "parameters": hex.EncodeToString(params)})
+	ev, _ := sensor.Events().Since(0)
+	var enabled bool
+	for _, e := range ev {
+		if e.Cat == libre2.CatNFC && e.Kind == "streaming-enabled" && strings.Contains(e.Msg, "424242") {
+			enabled = true
+		}
+	}
+	if !enabled {
+		t.Errorf("no streaming-enabled event: %+v", ev)
+	}
+}
+
+func TestReadingsOverHTTP(t *testing.T) {
+	srv, _ := newTestServer(t, 3*time.Hour)
+	call(t, srv, "POST", "/glucose", `{"kind":"fixed","value":110}`)
+	var h libre2.History
+	if s := get(t, srv, "/readings?minutes=30", &h); s != http.StatusOK {
+		t.Fatalf("HTTP %d", s)
+	}
+	if len(h.Values) != 30 || h.Next == nil || h.Trend == nil || h.Next.At == "" {
+		t.Fatalf("readings: %+v", h)
+	}
+	// /status gains the next reading and the trend; its other fields stay.
+	var st map[string]interface{}
+	get(t, srv, "/status", &st)
+	next, _ := st["nextReading"].(map[string]interface{})
+	if next == nil || next["inSeconds"] == nil || st["trend"] == nil || st["glucose"] == nil || st["uid"] == nil || st["lifeCount"] == nil {
+		t.Errorf("status: %v", st)
+	}
+	// A bad or missing minutes falls back to 60.
+	get(t, srv, "/readings?minutes=x", &h)
+	if len(h.Values) != 60 {
+		t.Errorf("default: %d values", len(h.Values))
+	}
+}
+
+func TestConfigOverHTTP(t *testing.T) {
+	state, err := libre2.NewState(15, time.Hour, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sensor := libre2.NewSensor(state, t.TempDir()+"/state.json")
+	a := newAPI(sensor)
+	a.launch = launchConfig{Version: "abc123", StatePath: "s.json", API: ":8081", Socket: "/tmp/x.sock", Days: 15, WarmupMinutes: 60}
+	srv := httptest.NewServer(a)
+	defer srv.Close()
+
+	var c struct {
+		Launch       launchConfig           `json:"launch"`
+		StrictUnlock bool                   `json:"strictUnlock"`
+		Sensor       map[string]interface{} `json:"sensor"`
+	}
+	if s := get(t, srv, "/config", &c); s != http.StatusOK {
+		t.Fatalf("HTTP %d", s)
+	}
+	if c.Launch != a.launch || c.StrictUnlock || c.Sensor["serial"] != sensor.Serial() || c.Sensor["uid"] == nil ||
+		c.Sensor["bleAddress"] == nil || c.Sensor["calibration"] == nil || c.Sensor["patchInfo"] == nil {
+		t.Errorf("config: %+v", c)
+	}
+
+	if s, r := call(t, srv, "POST", "/config", `{"strictUnlock":true}`); s != http.StatusOK || r["strictUnlock"] != true {
+		t.Errorf("POST /config: HTTP %d %v", s, r)
+	}
+	if !sensor.StrictUnlock() {
+		t.Error("strict unlock not set")
+	}
+	var st map[string]interface{}
+	get(t, srv, "/status", &st)
+	if st["strictUnlock"] != true {
+		t.Errorf("status strictUnlock %v", st["strictUnlock"])
+	}
+	call(t, srv, "POST", "/config", `{"strictUnlock":false}`)
+	if sensor.StrictUnlock() {
+		t.Error("strict unlock not cleared")
+	}
+	for _, body := range []string{`{`, `{}`, `{"strictUnlock":"yes"}`} {
+		if s, r := call(t, srv, "POST", "/config", body); s != http.StatusBadRequest || r["error"] == nil {
+			t.Errorf("%q: HTTP %d %v", body, s, r)
+		}
+	}
+	if s, _ := call(t, srv, "PUT", "/config", `{}`); s != http.StatusMethodNotAllowed {
+		t.Errorf("PUT /config: HTTP %d", s)
+	}
+	var ev eventsReply
+	get(t, srv, "/events", &ev)
+	if len(ev.Events) != 2 || ev.Events[0].Kind != "config" {
+		t.Errorf("events %+v", ev.Events)
 	}
 }

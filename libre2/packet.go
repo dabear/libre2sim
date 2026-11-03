@@ -192,6 +192,11 @@ func (s *Sensor) ArmFault(kind string) error {
 		kind = ""
 	}
 	s.fault = kind
+	if kind == "" {
+		s.events.Add(CatSensor, "fault-disarmed", "fault disarmed")
+	} else {
+		s.events.Add(CatSensor, "fault-armed", "fault %s armed for the next packet", kind)
+	}
 	return nil
 }
 
@@ -223,6 +228,7 @@ func (s *Sensor) notifies(lc int) [][]byte {
 	}
 	if fault != "" {
 		log.Printf("sending the packet for minute %d with fault %s", lc, fault)
+		s.events.Add(CatSensor, "fault-fired", "fault %s spoiled the packet for minute %d", fault, lc)
 	}
 	return notifyChunks(pkt)
 }

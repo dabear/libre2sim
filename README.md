@@ -122,7 +122,11 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | Endpoint | What it does |
 |---|---|
 | `GET /` | the control panel |
-| `GET /status` | UID, serial, patch info, BLE address and advertised name, FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed |
+| `GET /readings` | `?minutes=60` (1 to 1440): `{"minute","firstMinute","mgdl":[…],"next":{…},"trend":{…}}`, the latest readings oldest first (0 is no reading, in warmup) |
+| `GET /events` | `?since=<seq>`: `{"last":seq,"events":[{"seq","time","cat","kind","msg"}]}`, oldest first. `cat` is `nfc`, `ble` or `sensor`. The latest 200 events are kept in memory, so a restart (`/new`) empties them |
+| `GET /config` | `{"launch":{version, statePath, api, socket, fresh, days, warmupMinutes, ageMinutes, simulator, relaunch, suspend, dylib},"strictUnlock":bool,"sensor":{uid, serial, patchInfo, bleAddress, advertisedName, calibration, …}}` |
+| `POST /config` | `{"strictUnlock":true}`: toggle strict unlock at run time (the only setting that is safe to change live); answers like `GET /config`. 400 on anything else |
+| `GET /status` | UID, serial, patch info, BLE address and advertised name, FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed. Also `strictUnlock`, `unlocksAccepted`/`unlocksRefused` (since launch), `nextReading` (`{minute, mgdl, warmup, estimate, noiseSD, at, atMs, inSeconds}`) and `trend` (`delta1`, `delta5`, `delta15`: mg/dL against that many minutes earlier) |
 | `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`; applies from the next minute. 400 on another kind |
 | `POST /activate` | start a sensor still in its applicator (the Abbott app's job on a real one; LibreTransmitter cannot). 409 if already started |
 | `POST /disconnect` | the sensor drops the link and the app reconnects. 409 if no phone is connected |
@@ -132,6 +136,14 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | `POST /force-quit` | the app's end is a force-quit, not a termination: drop what it left lodged. 204 |
 | `POST /new` | `{"wearDays":15,"warmupMinutes":60,"ageMinutes":0}`: replace the sensor and restart libre2sim; the new sensor has its own UID, serial and BLE address. `ageMinutes` 0 is a sensor still in its applicator. 400 on bad input |
 | `POST /nfc` | what the Simulator needs in place of the sensor's NFC tag: `{"op":"identifier"}`, `{"op":"systemInfo"}`, `{"op":"readBlocks","first":n,"count":n}`, `{"op":"custom","code":161,"parameters":"<hex>"}`. An NFC error is 422 `{"error":…,"code":n}` |
+
+**The panel** shows the current reading (mg/dL and mmol/L, its sensor minute and trend), the next reading with a live
+countdown to when it is sent, and a 60-minute chart. The next reading is exact for `fixed` and `sine`. For `walk`, whose
+noise is drawn when the minute arrives, it is the model's mean (`estimate: true`, shown with a leading ≈); asking for it
+never disturbs the random sequence. Below are the sensor's status, the controls (glucose, link, faults, sensor life), the
+event log (every `/nfc` request and answer with its hex and error codes, BLE connects, unlocks, packets, faults, mode
+changes; filter All/NFC/BLE/Sensor, with a pause button) and the config (launch flags read-only, the sensor's identity, and
+a strict-unlock toggle).
 
 Any other method on a POST endpoint is 405. Errors are JSON `{"error":…,"code":n}`.
 

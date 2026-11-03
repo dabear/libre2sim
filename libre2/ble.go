@@ -61,6 +61,7 @@ func (s *Sensor) goOutOfRange(now time.Time, d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outOfRange = now.Add(d)
+	s.events.Add(CatSensor, "out-of-range", "out of range for %s", d.Round(time.Second))
 }
 
 // LinkOpened and LinkClosed track the sensor's one link: it does not

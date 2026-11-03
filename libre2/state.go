@@ -172,7 +172,7 @@ func (s *State) fill(lc int) {
 			continue
 		}
 		v := s.model(i)
-		s.Readings = append(s.Readings, uint16(math.Round(math.Max(40, math.Min(400, v)))))
+		s.Readings = append(s.Readings, uint16(math.Round(clampGlucose(v))))
 	}
 }
 
@@ -182,11 +182,7 @@ func (s *State) model(i int) float64 {
 	case "fixed":
 		return m.Value
 	case "walk":
-		prev := m.Value
-		if n := len(s.Readings); n > 0 && s.Readings[n-1] != 0 {
-			prev = float64(s.Readings[n-1])
-		}
-		return prev + (m.Value-prev)*0.02 + mrand.NormFloat64()*0.8
+		return s.walkMean() + mrand.NormFloat64()*walkNoiseSD
 	default:
 		period := m.PeriodMinutes
 		if period <= 0 {
