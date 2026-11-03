@@ -6,7 +6,7 @@ LibreTransmitter and Loop should do, and a verification mark.
 
 Verification marks: **cbharness** means `tools/cbharness` (real CoreBluetooth, real ImpossiBLE, LibreTransmitter's real
 `Libre2DirectTransmitter` plugin) can cover the scenario's BLE side. **Needs Loop** means only a full Loop build shows the result
-(alerts, the app relaunching, the chart). Every mark below is "not yet run".
+(alerts, the app relaunching, the chart). Each scenario ends with what has been run so far.
 
 ## Setup used by all of them
 
@@ -86,7 +86,9 @@ no BLE backfill, so the 20-minute gap stays in Loop's chart. That is expected.
 `curl -s -XPOST $API/disconnect` is the short version: a drop that LibreTransmitter reconnects from within seconds. It answers 409
 when no phone is connected.
 
-Verification: cbharness: not yet run (the hang-up and the re-advertise). Needs Loop: not yet run (the gap in the chart).
+Verification: cbharness: **passed** 2026-11-03 (`RECONNECT=1 FOLLOW=1`: out of range for 2 minutes, the app's connect is held, then
+advertise, connect, unlock, packets resume; this needed ImpossiBLE patch 0008, without which no reconnect from `didDisconnect` ever
+discovered its services). Needs Loop: not yet run (the gap in the chart).
 
 ---
 
@@ -105,7 +107,8 @@ curl -s -XPOST $API/glucose -d '{"kind":"sine","value":120,"amplitude":40,"perio
 
 Values are held to 40 to 400 mg/dL, the range of the sensor's readings.
 
-Verification: cbharness: not yet run (decodes the packet to 55 mg/dL). Needs Loop: not yet run (the alert).
+Verification: cbharness: **passed** 2026-11-03 (the next minute decodes to 55 mg/dL; earlier minutes keep the old model). Needs Loop: not
+yet run (the alert).
 
 ---
 
@@ -129,7 +132,9 @@ curl -s -XPOST $API/terminate
 
 Expect: `framState` 5, `terminated` in `/status`, the link drops, no more packets. Starting a new sensor is scenario 7.
 
-Verification: cbharness: not yet run (the stop of packets and the hang-up). Needs Loop: not yet run (the alerts).
+Verification: cbharness: **passed** 2026-11-03 (terminate: hang-up, no more packets, the reconnect is held, a new scan fails with NFC
+error `0xB0`; expiry with `-age 359h58m`: packets for minutes 21598 and 21599, then the hang-up at 21600). Needs Loop: not yet run (the
+alerts).
 
 ---
 
@@ -184,7 +189,8 @@ calibration is the new one and readings resume.
 `ageMinutes` 0 gives a sensor still in its applicator: scan it in the app, or `curl -s -XPOST $API/activate` (409 if it is
 already started) to start it by hand. It warms up for `warmupMinutes`, and LibreTransmitter shows no readings until then.
 
-Verification: cbharness: not yet run (the stale-name behaviour: the plugin does not match the new name). Needs Loop: not yet run.
+Verification: cbharness: **passed** 2026-11-03 (a reconnect with the old sensor finds nothing; a new scan pairs the new MAC and
+streams). Needs Loop: not yet run.
 
 ---
 

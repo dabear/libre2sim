@@ -161,6 +161,8 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     FRAM 05 with lifeCount frozen; a new pairing fails with NFC 0xB0 (LibreTransmitter logs it, UI shows nothing; finding 6).
     Expiry (`-age 359h58m`): packets 21598, 21599, then at 21600 hang-up "the sensor has ended", no packet 21600.
     Note: cbharness stdout to a file is buffered, so "PACKET n" can appear in the file a little late.
+22. **Scenario 7 (cbharness):** `/new` (age 180) → new UID/serial/MAC, not advertising until NFC enables streaming;
+    `RECONNECT=1` with the old sensor finds nothing (timeout); a fresh pairing gets the new MAC and streams.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -172,7 +174,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | 4 | Low glucose (e.g. fixed 55) | ✅ (finding 18) | not run |
 | 5 | Expiry / terminate | ✅ (finding 21) | not run |
 | 6 | Faults (badcrc, short) | ✅ (finding 16) | not run |
-| 7 | New sensor | not run | not run |
+| 7 | New sensor | ✅ (finding 22) | not run |
 | 8 | Beside libre3sim via impossible-mux | n/a | not run |
 
 Scenarios 3, 4, 5 and 7 can be done with cbharness without asking the user (cheap, local). Update this table and the
