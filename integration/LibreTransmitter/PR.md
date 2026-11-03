@@ -30,6 +30,9 @@ repeatable, and lets a change to this code be tested without a sensor.
 - Everything new is behind `#if targetEnvironment(simulator)`. The one edit outside it, `private` → `fileprivate` on
   `nfcCommand`, does not change what the function does.
 - The sources typecheck for both the Simulator and device targets, and a device build cannot see `SimulatedSensorPairingService`.
+- A device build compiles to the same code: resolving `#if targetEnvironment(simulator)` leaves only the `fileprivate` change, and
+  the pairing code compiled for arm64 iOS (`-O`, whole module) with and without this patch differs only in `__swift_modhash`, the
+  16-byte hash of the source text. Machine code, data and symbols are identical. (libre2sim's `tools/devicecheck`.)
 
 ## How it was tested
 

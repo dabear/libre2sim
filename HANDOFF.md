@@ -177,6 +177,10 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     Orchestrator check: gofmt/vet/`test -race` clean; diff read; live with cbharness: `/status` predicted minute 181 = 80 mg/dL,
     the real plugin decoded 181:80; `/events` held the whole NFC exchange, enable-streaming, connect, unlock, 2 packets,
     disconnect. The page was **not** looked at in a browser (only that it serves and has no external assets).
+25. **The patch doesn't change device builds (user asked):** `tools/devicecheck/devicecheck.sh`. Device-side source view (`#if
+    simulator` resolved) differs only by `private`→`fileprivate` + a blank line; arm64 iOS `-O -wmo` objects of the pairing code
+    differ in 16 bytes, **all in `__LLVM,__swift_modhash`** (source-text hash, not code). ManagerV3 can't compile here (LoopKit), but
+    its device view is identical. LibreTransmitter's own unit tests were not run (need LoopKit / a full workspace).
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
