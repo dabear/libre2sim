@@ -1,0 +1,388 @@
+From 30ad849827db0a9a9202a3f8766f9c9656a30c59 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <bjorninge-git@bjorninge.no>
+Date: Tue, 3 Nov 2026 09:39:32 +0100
+Subject: [PATCH] Pair with libre2sim in the iOS Simulator
+
+The Simulator has no NFC, so Libre 2 pairing there talks to libre2sim's
+HTTP stand-in for the sensor's NFC tag (LIBRE2SIM_URL, default
+http://127.0.0.1:8081) instead of CoreNFC.
+
+The enable-streaming command is factored out of SensorPairingService into
+Libre2NFC so both services build identical bytes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Features.swift                                |   4 +
+ LibreSensor/SensorPairing/Libre2NFC.swift     |  48 ++++++
+ .../SensorPairing/SensorPairingService.swift  |  51 +-----
+ .../SimulatedSensorPairingService.swift       | 157 ++++++++++++++++++
+ LibreTransmitter.xcodeproj/project.pbxproj    |   8 +
+ .../LibreTransmitterManagerV3.swift           |   4 +
+ 6 files changed, 222 insertions(+), 50 deletions(-)
+ create mode 100644 LibreSensor/SensorPairing/Libre2NFC.swift
+ create mode 100644 LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
+
+diff --git a/Features.swift b/Features.swift
+index 0253e1d..0888023 100644
+--- a/Features.swift
++++ b/Features.swift
+@@ -29,6 +29,10 @@ public final class Features {
+     static public var glucoseAlarmsAlsoCauseVibration = false
+     
+     static var phoneNFCAvailable: Bool {
++        #if targetEnvironment(simulator)
++        return true // pairing talks to libre2sim instead of CoreNFC
++        #else
+         return NFCNDEFReaderSession.readingAvailable
++        #endif
+     }
+ }
+diff --git a/LibreSensor/SensorPairing/Libre2NFC.swift b/LibreSensor/SensorPairing/Libre2NFC.swift
+new file mode 100644
+index 0000000..0b9667e
+--- /dev/null
++++ b/LibreSensor/SensorPairing/Libre2NFC.swift
+@@ -0,0 +1,48 @@
++//
++//  Libre2NFC.swift
++//  LibreTransmitter
++//
++//  The Libre 2 NFC commands shared by the CoreNFC pairing service and the
++//  Simulator's stand-in, so that they cannot drift apart.
++//
++
++import Foundation
++
++struct NFCCommand {
++    let code: UInt8
++    let parameters: Data
++}
++
++enum Subcommand: UInt8, CustomStringConvertible {
++    case activate = 0x1b
++    case enableStreaming = 0x1e
++    case unknown0x1a = 0x1a
++    case unknown0x1c = 0x1c
++    case unknown0x1d = 0x1d
++    case unknown0x1f = 0x1f
++
++    var description: String {
++        switch self {
++        case .activate: return "activate"
++        case .enableStreaming: return "enable BLE streaming"
++        default: return "[unknown: 0x\(String(format: "%x", rawValue))]"
++        }
++    }
++}
++
++enum Libre2NFC {
++    /// The custom command that enables Bluetooth on a Libre 2. The sensor answers
++    /// with its peripheral MAC address.
++    ///
++    /// The unlockCode could be any 32 bit value. The unlockCode and sensor Uid / patchInfo
++    /// will have also to be provided to the login function when connecting to peripheral.
++    static func enableStreamingCommand(unlockCode: UInt32, patchInfo: Data, sensorUID: Data) -> (code: UInt8, parameters: Data) {
++        let code = Subcommand.enableStreaming
++        let b: [UInt8] = [UInt8(unlockCode & 0xFF), UInt8((unlockCode >> 8) & 0xFF), UInt8((unlockCode >> 16) & 0xFF), UInt8((unlockCode >> 24) & 0xFF)]
++        let y = UInt16(patchInfo[4...5]) ^ UInt16(b[1], b[0])
++
++        let d = Libre2.usefulFunction(id: [UInt8](sensorUID), x: UInt16(code.rawValue), y: y)
++
++        return (code: 0xA1, parameters: Data([code.rawValue]) + b + d)
++    }
++}
+diff --git a/LibreSensor/SensorPairing/SensorPairingService.swift b/LibreSensor/SensorPairing/SensorPairingService.swift
+index ce31cd4..5319531 100644
+--- a/LibreSensor/SensorPairing/SensorPairingService.swift
++++ b/LibreSensor/SensorPairing/SensorPairingService.swift
+@@ -165,7 +165,7 @@ public class SensorPairingService: NSObject, NFCTagReaderSessionDelegate, Sensor
+                                     }
+ 
+                                     let subCmd: Subcommand = .enableStreaming
+-                                    let cmd = self.nfcCommand(subCmd, unlockCode: self.unlockCode, patchInfo: patchInfo, sensorUID: sensorUID)
++                                    let cmd = Libre2NFC.enableStreamingCommand(unlockCode: self.unlockCode, patchInfo: patchInfo, sensorUID: sensorUID)
+ 
+                                     tag.customCommand(requestFlags: .highDataRate, customCommandCode: Int(cmd.code), customRequestParameters: cmd.parameters) { response, _ in
+                                         var streamingEnabled = false
+@@ -334,33 +334,6 @@ public class SensorPairingService: NSObject, NFCTagReaderSessionDelegate, Sensor
+             }
+         }
+     }
+-
+-    private func nfcCommand(_ code: Subcommand, unlockCode: UInt32, patchInfo: Data, sensorUID: Data) -> NFCCommand {
+-        var b: [UInt8] = []
+-        var y: UInt16
+-
+-        if code == .enableStreaming {
+-            // Enables Bluetooth on Libre 2. Returns peripheral MAC address to connect to.
+-            // unlockCode could be any 32 bit value. The unlockCode and sensor Uid / patchInfo
+-            // will have also to be provided to the login function when connecting to peripheral.
+-            b = [UInt8(unlockCode & 0xFF), UInt8((unlockCode >> 8) & 0xFF), UInt8((unlockCode >> 16) & 0xFF), UInt8((unlockCode >> 24) & 0xFF)]
+-            y = UInt16(patchInfo[4...5]) ^ UInt16(b[1], b[0])
+-        } else {
+-            y = 0x1b6a
+-        }
+-
+-        let d = Libre2.usefulFunction(id: [UInt8](sensorUID), x: UInt16(code.rawValue), y: y)
+-
+-        var parameters = Data([code.rawValue])
+-
+-        if code == .enableStreaming {
+-            parameters += b
+-        }
+-
+-        parameters += d
+-
+-        return NFCCommand(code: 0xA1, parameters: parameters)
+-    }
+ }
+ 
+ extension UInt16 {
+@@ -372,25 +345,3 @@ extension UInt16 {
+         self = UInt16(data[data.startIndex + 1]) << 8 + UInt16(data[data.startIndex])
+     }
+ }
+-
+-private struct NFCCommand {
+-    let code: UInt8
+-    let parameters: Data
+-}
+-
+-private enum Subcommand: UInt8, CustomStringConvertible {
+-    case activate = 0x1b
+-    case enableStreaming = 0x1e
+-    case unknown0x1a = 0x1a
+-    case unknown0x1c = 0x1c
+-    case unknown0x1d = 0x1d
+-    case unknown0x1f = 0x1f
+-
+-    var description: String {
+-        switch self {
+-        case .activate: return "activate"
+-        case .enableStreaming: return "enable BLE streaming"
+-        default: return "[unknown: 0x\(String(format: "%x", rawValue))]"
+-        }
+-    }
+-}
+diff --git a/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift b/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
+new file mode 100644
+index 0000000..4d96790
+--- /dev/null
++++ b/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
+@@ -0,0 +1,157 @@
++//
++//  SimulatedSensorPairingService.swift
++//  LibreTransmitter
++//
++
++#if targetEnvironment(simulator)
++import Foundation
++import Combine
++
++/// The iOS Simulator has no NFC, so Libre 2 pairing there talks to libre2sim,
++/// whose HTTP API stands in for the sensor's NFC tag. It is asked the same
++/// questions SensorPairingService asks over CoreNFC, in the same order, and the
++/// answers go through the same checks. Set LIBRE2SIM_URL to reach it somewhere
++/// other than port 8081.
++public final class SimulatedSensorPairingService: SensorPairingProtocol {
++    struct Failure: LocalizedError {
++        let message: String
++        var errorDescription: String? { message }
++    }
++
++    private let readingsSubject = PassthroughSubject<SensorPairingInfo, Never>()
++    private let errorSubject = PassthroughSubject<Error, Never>()
++
++    private let unlockCode: UInt32 = 42 // same as SensorPairingService
++
++    public var onCancel: (() -> Void)?
++
++    public var publisher: AnyPublisher<SensorPairingInfo, Never> {
++        readingsSubject.eraseToAnyPublisher()
++    }
++
++    public var errorPublisher: AnyPublisher<Error, Never> {
++        errorSubject.eraseToAnyPublisher()
++    }
++
++    static var baseURL: URL {
++        URL(string: ProcessInfo.processInfo.environment["LIBRE2SIM_URL"] ?? "http://127.0.0.1:8081")!
++    }
++
++    public func pairSensor() throws {
++        Task {
++            do {
++                let info = try await scan()
++                DispatchQueue.main.async { self.readingsSubject.send(info) }
++            } catch {
++                print("libre2sim pairing failed: \(error.localizedDescription)")
++                DispatchQueue.main.async {
++                    self.errorSubject.send(error)
++                    self.onCancel?()
++                }
++            }
++        }
++    }
++
++    /// SensorPairingService's scan, with libre2sim as the tag.
++    private func scan() async throws -> SensorPairingInfo {
++        let sensorUID = Data(try await nfc(["op": "identifier"]).reversed())
++        _ = try await nfc(["op": "systemInfo"])
++        let patchInfo = try await nfc(["op": "custom", "code": 0xA1, "parameters": ""])
++
++        let blocks = 43
++        let requestBlocks = 3
++        var fram = Data()
++        for first in stride(from: 0, to: blocks, by: requestBlocks) {
++            fram += try await readBlocks(first: first, count: min(requestBlocks, blocks - first))
++        }
++
++        // patchInfo should have length 6, but indexing it below would crash if it did not
++        guard patchInfo.count >= 6 else { throw PairingError.noPatchInfo }
++
++        let cmd = Libre2NFC.enableStreamingCommand(unlockCode: unlockCode, patchInfo: patchInfo, sensorUID: sensorUID)
++        let response = try await nfc(["op": "custom", "code": Int(cmd.code), "parameters": cmd.parameters.hexEncodedString()])
++
++        var streamingEnabled = false
++        var macAddress: String?
++        if response.count == 6 {
++            streamingEnabled = true
++            macAddress = Data(response.reversed()).hexEncodedString().uppercased()
++        }
++
++        guard sensorUID.count == 8 && patchInfo.count == 6 && fram.count == 344 else {
++            throw PairingError.noSensorData
++        }
++        let sensorType = SensorType(patchInfo: patchInfo)
++        guard sensorType == .libre2 else {
++            throw PairingError.wrongSensorType
++        }
++
++        let decryptedBytes: [UInt8]
++        do {
++            decryptedBytes = try Libre2.decryptFRAM(type: sensorType, id: [UInt8](sensorUID), info: patchInfo, data: [UInt8](fram))
++        } catch {
++            throw PairingError.decryptionError
++        }
++
++        return SensorPairingInfo(uuid: sensorUID, patchInfo: patchInfo, fram: Data(decryptedBytes), streamingEnabled: streamingEnabled, macAddress: macAddress)
++    }
++
++    private func readBlocks(first: Int, count: Int) async throws -> Data {
++        struct Reply: Decodable { let blocks: [String] }
++        let reply = try JSONDecoder().decode(Reply.self, from: try await post(["op": "readBlocks", "first": first, "count": count]))
++        var data = Data()
++        for block in reply.blocks {
++            guard let bytes = Data(simulatorHex: block) else { throw Failure(message: "libre2sim sent a malformed block") }
++            data += bytes
++        }
++        return data
++    }
++
++    /// An ISO 15693 command, answered as CoreNFC would return it.
++    private func nfc(_ request: [String: Any]) async throws -> Data {
++        struct Reply: Decodable { let response: String }
++        let reply = try JSONDecoder().decode(Reply.self, from: try await post(request))
++        guard let data = Data(simulatorHex: reply.response) else {
++            throw Failure(message: "libre2sim sent a malformed NFC response")
++        }
++        return data
++    }
++
++    private func post(_ body: [String: Any]) async throws -> Data {
++        var request = URLRequest(url: Self.baseURL.appendingPathComponent("nfc"))
++        request.httpMethod = "POST"
++        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        request.httpBody = try JSONSerialization.data(withJSONObject: body)
++
++        let data: Data
++        let response: URLResponse
++        do {
++            (data, response) = try await URLSession.shared.data(for: request)
++        } catch {
++            throw Failure(message: "libre2sim is not running at \(Self.baseURL.absoluteString): \(error.localizedDescription)")
++        }
++
++        if let status = (response as? HTTPURLResponse)?.statusCode, status != 200 {
++            struct Reply: Decodable { let error: String? }
++            let message = (try? JSONDecoder().decode(Reply.self, from: data))?.error ?? "HTTP \(status)"
++            throw Failure(message: "libre2sim: \(message)")
++        }
++        return data
++    }
++}
++
++private extension Data {
++    init?(simulatorHex hex: String) {
++        guard hex.count % 2 == 0 else { return nil }
++        var bytes = [UInt8]()
++        var index = hex.startIndex
++        while index < hex.endIndex {
++            let next = hex.index(index, offsetBy: 2)
++            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
++            bytes.append(byte)
++            index = next
++        }
++        self.init(bytes)
++    }
++}
++#endif
+diff --git a/LibreTransmitter.xcodeproj/project.pbxproj b/LibreTransmitter.xcodeproj/project.pbxproj
+index 2e9477d..7b8bf44 100644
+--- a/LibreTransmitter.xcodeproj/project.pbxproj
++++ b/LibreTransmitter.xcodeproj/project.pbxproj
+@@ -124,6 +124,8 @@
+ 		C1BDBB002A45051B00A787D1 /* LibreDemoPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1BDBAFC2A43985000A787D1 /* LibreDemoPlugin.swift */; };
+ 		C1BDBB022A45064F00A787D1 /* LibreDemoCGMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1BDBAFD2A43992A00A787D1 /* LibreDemoCGMManager.swift */; };
+ 		C1BDBB032A45158A00A787D1 /* SensorPairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C74426DF636900E31BD9 /* SensorPairingService.swift */; };
++		B8DDCA57617A0ECE462660BA /* Libre2NFC.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF0B9771AB43C92802601CC /* Libre2NFC.swift */; };
++		6A74C3C019B85D30CC1CABB3 /* SimulatedSensorPairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6D1BB4B1CB39805D4E451F /* SimulatedSensorPairingService.swift */; };
+ 		C1BDBB042A45159100A787D1 /* SensorPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C74626DF63C800E31BD9 /* SensorPairing.swift */; };
+ 		C1C318CD2A47468D00C6F29F /* BluetoothSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27850BC8256725E70020D109 /* BluetoothSearch.swift */; };
+ 		C1C318CE2A4746A800C6F29F /* GenericThrottler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F1592E26CAF6BE00EBA666 /* GenericThrottler.swift */; };
+@@ -211,6 +213,8 @@
+ 		2746C73D26DCF83400E31BD9 /* Features.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features.swift; sourceTree = "<group>"; };
+ 		2746C74126DD0F8800E31BD9 /* Libre2DirectSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Libre2DirectSetup.swift; sourceTree = "<group>"; };
+ 		2746C74426DF636900E31BD9 /* SensorPairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorPairingService.swift; sourceTree = "<group>"; };
++		1BF0B9771AB43C92802601CC /* Libre2NFC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Libre2NFC.swift; sourceTree = "<group>"; };
++		FB6D1BB4B1CB39805D4E451F /* SimulatedSensorPairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatedSensorPairingService.swift; sourceTree = "<group>"; };
+ 		2746C74626DF63C800E31BD9 /* SensorPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorPairing.swift; sourceTree = "<group>"; };
+ 		274E71D2297ED77300FCFECD /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+ 		274E71D42986D4A600FCFECD /* CriticalAlarmsVolumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CriticalAlarmsVolumeView.swift; sourceTree = "<group>"; };
+@@ -373,6 +377,8 @@
+ 			children = (
+ 				2746C74426DF636900E31BD9 /* SensorPairingService.swift */,
+ 				2746C74626DF63C800E31BD9 /* SensorPairing.swift */,
++				1BF0B9771AB43C92802601CC /* Libre2NFC.swift */,
++				FB6D1BB4B1CB39805D4E451F /* SimulatedSensorPairingService.swift */,
+ 			);
+ 			path = SensorPairing;
+ 			sourceTree = "<group>";
+@@ -973,6 +979,8 @@
+ 				27850D9F25672F190020D109 /* LibreTransmitterProxyProtocol.swift in Sources */,
+ 				27850DCC25672F770020D109 /* Measurement.swift in Sources */,
+ 				C1BDBB032A45158A00A787D1 /* SensorPairingService.swift in Sources */,
++				6A74C3C019B85D30CC1CABB3 /* SimulatedSensorPairingService.swift in Sources */,
++				B8DDCA57617A0ECE462660BA /* Libre2NFC.swift in Sources */,
+ 				27850DCB25672F770020D109 /* SensorSerialNumber.swift in Sources */,
+ 				C1C318D52A47638E00C6F29F /* FakeSensorPairingData.swift in Sources */,
+ 				27850DA525672F1C0020D109 /* LibreTransmitterProxyManager.swift in Sources */,
+diff --git a/LibreTransmitter/LibreTransmitterManagerV3.swift b/LibreTransmitter/LibreTransmitterManagerV3.swift
+index 93973a3..384ba3c 100644
+--- a/LibreTransmitter/LibreTransmitterManagerV3.swift
++++ b/LibreTransmitter/LibreTransmitterManagerV3.swift
+@@ -320,7 +320,11 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
+     internal var countTimesWithoutData: Int = 0
+ 
+     open var pairingService: SensorPairingProtocol {
++        #if targetEnvironment(simulator)
++        return SimulatedSensorPairingService()
++        #else
+         return SensorPairingService()
++        #endif
+     }
+ 
+     open var bluetoothSearcher: BluetoothSearcher {
+-- 
+2.54.0 (Apple Git-157)
+
