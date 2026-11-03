@@ -3,7 +3,7 @@
 Read this first if you are resuming the work. It records where things stand, what has been verified,
 and how to continue. Keep it updated after every milestone.
 
-**Last updated:** 2026-11-03, M4 verified through real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; M5 next.
+**Last updated:** 2026-11-03. M0–M6 are done and verified with the harnesses. What's left: scenarios that need Loop, a full Loop build, and publishing.
 
 ## Documents
 
@@ -54,8 +54,8 @@ session should re-clone them (shallow is fine) into its own scratchpad.
 | M3 | LibreTransmitter Simulator hook: `integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch` | ✅ done, verified live through the pair harness | `0b3be5d` |
 | M2 | Sensor state, FRAM builder, glucose inverse, NFC model, `main.go`/`api.go` with `/nfc` `/status` `/glucose` `/activate` `/new` | ✅ done, verified live (see finding 8) | `f3a79e7` |
 | M4 | BLE: `impossible.go` (FDE3/F001/F002, advert name = MAC), `libre2/handler.go` (unlock check → 46-byte packet each minute as 20+20+6), packet builder, /disconnect /out-of-range /terminate /force-quit | ✅ done, verified (findings 11–13) | `4df02ef` |
-| M5 | `/fault` (badcrc, short), web control panel, API test coverage, `docs/scenarios.md` checklist | 🔄 in progress (Sonnet subagent, combined with M6, started after `6167c74`). Live smoke on :8093 with `/tmp/l2s-m5.sock` | — |
-| M6 | README rewrite, `integration/LibreTransmitter/PR.md`, `docs/libre3sim-transport-fixes.md` | 🔄 in progress (same subagent as M5) | — |
+| M5 | `/fault` (badcrc, short), web control panel (`web.go`), API test coverage, `docs/scenarios.md` | ✅ done, faults verified with cbharness (finding 16) | see git log |
+| M6 | README rewrite, `integration/LibreTransmitter/PR.md`, `docs/libre3sim-transport-fixes.md` | ✅ done, reviewed; the badcrc claim was corrected by the orchestrator | see git log |
 
 ## Verified findings (keep these; they're not obvious from the code)
 
@@ -118,6 +118,23 @@ session should re-clone them (shallow is fine) into its own scratchpad.
     unlockCount = 3. `RECONNECT=1 REPLAY=2` → the sim logged "hanging up: bad unlock: unlock count 2 replayed: the
     last accepted was 3", the app got didDisconnect, and the sensor advertised again.
 
+16. **Fault behaviour in LibreTransmitter, verified with cbharness:**
+    - `badcrc`: the packet is **dropped silently**. `decryptBLE` throws, and `Libre2DirectTransmitter.handleCompleteMessage` has
+      an empty `catch {}`, so `checksumValidationError` never fires for a corrupted CRC. The next minute parses fine.
+    - `short`: **one 45-byte packet stalls LibreTransmitter until it reconnects.** Its buffer is only parsed at exactly 46
+      bytes and only reset on notify-state change or reconnect, so every later packet is appended and never parsed.
+      This is a real robustness bug in LibreTransmitter (a lost notify on a real link would do the same); worth an upstream issue.
+17. The M5 subagent also made `/glucose` reject unknown kinds with 400; before, an unknown kind fell back to sine.
+
+## Remaining work (not started)
+
+- Upstream issues/PRs: the LibreTransmitter PR (`integration/LibreTransmitter/PR.md` + patch); a LibreTransmitter issue for
+  finding 16 (short packet stall, silent CRC drop) and finding 7 (trend timestamps); the libre3sim transport fixes
+  (`docs/libre3sim-transport-fixes.md`). **Ask the user before posting anything.**
+- Scenarios that need Loop in `docs/scenarios.md`: build LoopWorkspace for the Simulator with the patched
+  LibreTransmitter, then launch with the dylib injected. Heavy (large clone and build); ask the user first.
+- Publishing libre2sim: no remote yet; README/PR.md have no libre2sim URL.
+
 ## Independent check harness (orchestrator-owned)
 
 **BLE harness (`tools/bleharness/`, for verifying M4):** a macOS Swift program built from LibreTransmitter's
@@ -148,7 +165,7 @@ iOS-Simulator executable and pairs against a live libre2sim. See its README. Sta
 3. Delegate M4 (Opus). Verify by decrypting the notified packets with the Swift `Libre2.decryptBLE` and
    `parseBLEData` (extend `tools/swiftvectors` or the harness) and checking that
    `mgdlForRaw(raw)` ≈ the modelled glucose. Then M5 and M6.
-4. After M5/M6: the orchestrator runs the `docs/scenarios.md` scenarios that cbharness can cover (reconnect with
-   unlock count 2, out-of-range, `/fault badcrc` → the plugin reports checksumValidationError, terminate) and fills in the marks.
+4. cbharness scenarios done: 1 (pair + stream), 2 (reconnect/strict), 6 (faults). Still open with cbharness: 3 (out-of-range),
+   4 (low glucose decode), 5 (expiry/terminate), 7 (new sensor).
 5. A full Loop build in the Simulator (LoopWorkspace + ImpossiBLE) is the final end-to-end check. It
    has not been attempted yet.
