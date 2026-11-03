@@ -17,6 +17,11 @@ service.publisher.sink { info in
         if var sd2 = SensorData(uuid: info.uuid, bytes: [UInt8](info.fram)) { sd2.patchInfo = info.patchInfo; print("serial", sd2.serialNumber) }
         print("calibration", sd.calibrationData.description)
         print("SensorType", SensorType(patchInfo: info.patchInfo).description)
+        // Decode the FRAM trend ring with LibreTransmitter's own algorithm: an
+        // independent check of libre2sim's inverse glucose formula.
+        let cal = sd.calibrationData
+        let trend = sd.trendMeasurements().prefix(5).map { Int($0.calibratedGlucose(calibrationInfo: cal)) }
+        print("trend mg/dL (newest first, LibreTransmitter algorithm)", trend)
     } else { print("sensorData nil") }
     done = true
 }.store(in: &bag)
