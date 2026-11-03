@@ -9,7 +9,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$work"
 for f in $(git -C "$patched" diff --name-only "$(git -C "$orig" rev-parse HEAD)" -- '*.swift'); do
 	echo "== $f"
-	diff <(python3 -I "$here/device_view.py" "$orig/$f") <(python3 -I "$here/device_view.py" "$patched/$f") || true
+	o="$orig/$f"
+	[ -f "$o" ] || o=/dev/null # a new file: a device build should see nothing but its comments
+	diff <(python3 -I "$here/device_view.py" "$o") <(python3 -I "$here/device_view.py" "$patched/$f") || true
 done
 for v in orig patched; do
 	eval src=\$$v

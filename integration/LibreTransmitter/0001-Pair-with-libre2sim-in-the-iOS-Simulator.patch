@@ -1,5 +1,5 @@
-From 997cc205aa13f32ced00eb9a25d3df28e46205c8 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <bjorninge-git@bjorninge.no>
+From fc071969e0f4bf81d90a440feac8c4105a31227c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <b.inge@nightscoutfoundation.org>
 Date: Tue, 3 Nov 2026 11:31:14 +0100
 Subject: [PATCH] Pair with libre2sim in the iOS Simulator
 
@@ -11,15 +11,25 @@ puts the answers through the same checks.
 SimulatedSensorPairingService lives in its own file, compiled only for the
 Simulator. It gets the enable-streaming command from SensorPairingService's
 own nfcCommand (now fileprivate) through a Simulator-only extension, so the
-two cannot drift apart. Device builds compile to the same code as before.
+two cannot drift apart.
+
+On the Simulator, Libre 2 setup also shows SimulatorPairingNotice: that
+pairing there needs libre2sim rather than a sensor, the steps to set it up,
+a live check of each step it can (libre2sim reachable and its sensor's
+state, the ImpossiBLE library loaded), and why a pairing failed.
+
+Device builds compile to the same code as before.
 ---
  Features.swift                                |   4 +
  .../SensorPairing/SensorPairingService.swift  |  13 +-
  .../SimulatedSensorPairingService.swift       | 158 ++++++++++++++++++
- LibreTransmitter.xcodeproj/project.pbxproj    |   4 +
+ LibreTransmitter.xcodeproj/project.pbxproj    |   8 +
  .../LibreTransmitterManagerV3.swift           |   4 +
- 5 files changed, 182 insertions(+), 1 deletion(-)
+ .../Views/Setup/Libre2DirectSetup.swift       |   3 +
+ .../Views/Setup/SimulatorPairingNotice.swift  | 119 +++++++++++++
+ 7 files changed, 308 insertions(+), 1 deletion(-)
  create mode 100644 LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
+ create mode 100644 LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift
 
 diff --git a/Features.swift b/Features.swift
 index a29927c..4965ae9 100644
@@ -66,7 +76,7 @@ index d86f4af..34c0542 100644
 +#endif
 diff --git a/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift b/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
 new file mode 100644
-index 0000000..38b7977
+index 0000000..c5d3423
 --- /dev/null
 +++ b/LibreSensor/SensorPairing/SimulatedSensorPairingService.swift
 @@ -0,0 +1,158 @@
@@ -105,7 +115,7 @@ index 0000000..38b7977
 +        errorSubject.eraseToAnyPublisher()
 +    }
 +
-+    static var baseURL: URL {
++    public static var baseURL: URL {
 +        URL(string: ProcessInfo.processInfo.environment["LIBRE2SIM_URL"] ?? "http://127.0.0.1:8081")!
 +    }
 +
@@ -229,10 +239,18 @@ index 0000000..38b7977
 +}
 +#endif
 diff --git a/LibreTransmitter.xcodeproj/project.pbxproj b/LibreTransmitter.xcodeproj/project.pbxproj
-index 745a14a..fd180e8 100644
+index 745a14a..b854198 100644
 --- a/LibreTransmitter.xcodeproj/project.pbxproj
 +++ b/LibreTransmitter.xcodeproj/project.pbxproj
-@@ -114,6 +114,7 @@
+@@ -19,6 +19,7 @@
+ 		2746C73C26D91FC900E31BD9 /* Libre2DirectTransmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C73B26D91FC900E31BD9 /* Libre2DirectTransmitter.swift */; };
+ 		2746C73F26DCF83700E31BD9 /* Features.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C73D26DCF83400E31BD9 /* Features.swift */; };
+ 		2746C74226DD0F8800E31BD9 /* Libre2DirectSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C74126DD0F8800E31BD9 /* Libre2DirectSetup.swift */; };
++		91D64F32BCCBF25B20E8974F /* SimulatorPairingNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38A33766FADF512E7494E0D6 /* SimulatorPairingNotice.swift */; };
+ 		274E71D3297ED77300FCFECD /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 274E71D2297ED77300FCFECD /* AuthView.swift */; };
+ 		275786AB26753CC400845D0E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275786AA26753CC400845D0E /* SettingsView.swift */; };
+ 		275EC993265AEE970043210E /* NumericTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275EC992265AEE970043210E /* NumericTextField.swift */; };
+@@ -114,6 +115,7 @@
  		C1BDBB002A45051B00A787D1 /* LibreDemoPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1BDBAFC2A43985000A787D1 /* LibreDemoPlugin.swift */; };
  		C1BDBB022A45064F00A787D1 /* LibreDemoCGMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1BDBAFD2A43992A00A787D1 /* LibreDemoCGMManager.swift */; };
  		C1BDBB032A45158A00A787D1 /* SensorPairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C74426DF636900E31BD9 /* SensorPairingService.swift */; };
@@ -240,15 +258,25 @@ index 745a14a..fd180e8 100644
  		C1BDBB042A45159100A787D1 /* SensorPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2746C74626DF63C800E31BD9 /* SensorPairing.swift */; };
  		C1C318CD2A47468D00C6F29F /* BluetoothSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27850BC8256725E70020D109 /* BluetoothSearch.swift */; };
  		C1C318CE2A4746A800C6F29F /* GenericThrottler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F1592E26CAF6BE00EBA666 /* GenericThrottler.swift */; };
-@@ -200,6 +201,7 @@
+@@ -199,7 +201,9 @@
+ 		2746C73B26D91FC900E31BD9 /* Libre2DirectTransmitter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Libre2DirectTransmitter.swift; sourceTree = "<group>"; };
  		2746C73D26DCF83400E31BD9 /* Features.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features.swift; sourceTree = "<group>"; };
  		2746C74126DD0F8800E31BD9 /* Libre2DirectSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Libre2DirectSetup.swift; sourceTree = "<group>"; };
++		38A33766FADF512E7494E0D6 /* SimulatorPairingNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorPairingNotice.swift; sourceTree = "<group>"; };
  		2746C74426DF636900E31BD9 /* SensorPairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorPairingService.swift; sourceTree = "<group>"; };
 +		8594CA6058B843652417F1C6 /* SimulatedSensorPairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatedSensorPairingService.swift; sourceTree = "<group>"; };
  		2746C74626DF63C800E31BD9 /* SensorPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorPairing.swift; sourceTree = "<group>"; };
  		274E71D2297ED77300FCFECD /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
  		275786AA26753CC400845D0E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-@@ -353,6 +355,7 @@
+@@ -343,6 +347,7 @@
+ 			children = (
+ 				27850D4B25672DFB0020D109 /* BluetoothSelection.swift */,
+ 				2746C74126DD0F8800E31BD9 /* Libre2DirectSetup.swift */,
++				38A33766FADF512E7494E0D6 /* SimulatorPairingNotice.swift */,
+ 				27A5912626E0E32C00A7EE36 /* ModeSelectionView.swift */,
+ 				274E71D2297ED77300FCFECD /* AuthView.swift */,
+ 			);
+@@ -353,6 +358,7 @@
  			isa = PBXGroup;
  			children = (
  				2746C74426DF636900E31BD9 /* SensorPairingService.swift */,
@@ -256,7 +284,7 @@ index 745a14a..fd180e8 100644
  				2746C74626DF63C800E31BD9 /* SensorPairing.swift */,
  			);
  			path = SensorPairing;
-@@ -936,6 +939,7 @@
+@@ -936,6 +942,7 @@
  				27850D9F25672F190020D109 /* LibreTransmitterProxyProtocol.swift in Sources */,
  				27850DCC25672F770020D109 /* Measurement.swift in Sources */,
  				C1BDBB032A45158A00A787D1 /* SensorPairingService.swift in Sources */,
@@ -264,6 +292,14 @@ index 745a14a..fd180e8 100644
  				27850DCB25672F770020D109 /* SensorSerialNumber.swift in Sources */,
  				C1C318D52A47638E00C6F29F /* FakeSensorPairingData.swift in Sources */,
  				27850DA525672F1C0020D109 /* LibreTransmitterProxyManager.swift in Sources */,
+@@ -965,6 +972,7 @@
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				2746C74226DD0F8800E31BD9 /* Libre2DirectSetup.swift in Sources */,
++				91D64F32BCCBF25B20E8974F /* SimulatorPairingNotice.swift in Sources */,
+ 				27ED67BA26990D6B003E5DAB /* GenericObservableObject.swift in Sources */,
+ 				27850D4E25672DFB0020D109 /* LibreTransmitterSetupViewController.swift in Sources */,
+ 				276EF5F22652F84F00571021 /* HashableClass.swift in Sources */,
 diff --git a/LibreTransmitter/LibreTransmitterManagerV3.swift b/LibreTransmitter/LibreTransmitterManagerV3.swift
 index c6a3151..366bf15 100644
 --- a/LibreTransmitter/LibreTransmitterManagerV3.swift
@@ -280,6 +316,145 @@ index c6a3151..366bf15 100644
      }
  
      open var bluetoothSearcher: BluetoothSearcher {
+diff --git a/LibreTransmitterUI/Views/Setup/Libre2DirectSetup.swift b/LibreTransmitterUI/Views/Setup/Libre2DirectSetup.swift
+index cdf4303..a54b117 100644
+--- a/LibreTransmitterUI/Views/Setup/Libre2DirectSetup.swift
++++ b/LibreTransmitterUI/Views/Setup/Libre2DirectSetup.swift
+@@ -101,6 +101,9 @@ struct Libre2DirectSetup: View {
+             
+             VStack {
+                 getLeadingImage()
++                #if targetEnvironment(simulator)
++                SimulatorPairingNotice(pairingService: pairingService)
++                #endif
+                 HStack {
+                     InstructionList(instructions: [
+                         LocalizedString("Your sensor must be activated and fully warmed up.", comment: "Label text for step 1 of libre2 setup"),
+diff --git a/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift b/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift
+new file mode 100644
+index 0000000..6a39585
+--- /dev/null
++++ b/LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift
+@@ -0,0 +1,119 @@
++//
++//  SimulatorPairingNotice.swift
++//  LibreTransmitterUI
++//
++//  Shown on Libre 2 setup in the iOS Simulator only.
++//
++
++#if targetEnvironment(simulator)
++import Combine
++import SwiftUI
++import LibreTransmitter
++
++/// The iOS Simulator has no NFC and no Bluetooth, so Libre 2 pairing there
++/// talks to libre2sim, a simulated sensor that runs on the Mac. This says so,
++/// lists what it takes, checks each step it can, and shows why a pairing
++/// failed (the setup screen otherwise only stops spinning).
++struct SimulatorPairingNotice: View {
++    let pairingService: SensorPairingProtocol
++
++    @State private var sensor: String?  // what libre2sim says about its sensor; nil until checked
++    @State private var reachable: Bool?
++    @State private var pairingError: String?
++
++    // ImpossiBLE's CoreBluetooth stand-in, present only when its library is injected.
++    private let bluetoothLoaded = NSClassFromString("CBSPeripheral") != nil
++    private let url = SimulatedSensorPairingService.baseURL
++
++    private var errors: AnyPublisher<Error, Never> {
++        (pairingService as? SimulatedSensorPairingService)?.errorPublisher ?? Empty().eraseToAnyPublisher()
++    }
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 10) {
++            Label {
++                Text(verbatim: "Simulator: this pairs with libre2sim, not a real sensor").font(.headline)
++            } icon: {
++                Image(systemName: "desktopcomputer")
++            }
++            Text(verbatim: "The Simulator has no NFC or Bluetooth. Pair Sensor talks to libre2sim, a simulated Libre 2 running on this Mac. Its readings are made up: for development only, never for treatment decisions.")
++                .font(.footnote)
++                .fixedSize(horizontal: false, vertical: true)
++
++            step(1, done: reachable,
++                 "Start libre2sim on this Mac: run ./start.sh in the libre2sim folder.",
++                 detail: reachable == false ? "Not running at \(url.absoluteString)." : sensor)
++            step(2, done: bluetoothLoaded,
++                 "Run this app with the ImpossiBLE library: copy the three environment variables start.sh prints into the scheme (Run, Arguments, Environment Variables), then run again.",
++                 detail: bluetoothLoaded ? nil : "The library is not loaded, so the app cannot connect after pairing.")
++            step(3, done: nil,
++                 "Tap Pair Sensor. libre2sim's control panel (\(url.absoluteString)) can activate the sensor or end its warmup.",
++                 detail: nil)
++
++            if let pairingError {
++                Text(verbatim: "Pairing failed: \(pairingError)")
++                    .font(.footnote)
++                    .foregroundColor(.red)
++                    .fixedSize(horizontal: false, vertical: true)
++            }
++        }
++        .padding()
++        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
++        .task {
++            // Recheck while the screen is up, so starting libre2sim shows here.
++            while !Task.isCancelled {
++                await check()
++                try? await Task.sleep(nanoseconds: 3_000_000_000)
++            }
++        }
++        .onReceive(errors.receive(on: DispatchQueue.main)) { error in
++            pairingError = error.localizedDescription
++        }
++    }
++
++    private func step(_ n: Int, done: Bool?, _ text: String, detail: String?) -> some View {
++        HStack(alignment: .top, spacing: 8) {
++            Group {
++                switch done {
++                case true?: Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
++                case false?: Image(systemName: "exclamationmark.circle.fill").foregroundColor(.orange)
++                case nil: Image(systemName: "\(n).circle")
++                }
++            }
++            .frame(width: 20)
++            VStack(alignment: .leading, spacing: 2) {
++                Text(verbatim: text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
++                if let detail {
++                    Text(verbatim: detail).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
++                }
++            }
++        }
++    }
++
++    /// Asks libre2sim's /status what state its sensor is in.
++    private func check() async {
++        struct Status: Decodable {
++            let serial: String
++            let framState: Int
++            let lifeCount: Int
++            let warmupMinutes: Int
++        }
++        do {
++            let (data, _) = try await URLSession.shared.data(from: url.appendingPathComponent("status"))
++            let s = try JSONDecoder().decode(Status.self, from: data)
++            let state: String
++            switch s.framState {
++            case 1: state = "still in its applicator: activate it in the control panel"
++            case 2: state = "warming up, \(max(s.warmupMinutes - s.lifeCount, 0)) min left (or end the warmup in the control panel)"
++            case 3: state = "ready to pair"
++            default: state = "ended: start a new sensor in the control panel"
++            }
++            reachable = true
++            sensor = "Found sensor \(s.serial): \(state)."
++        } catch {
++            reachable = false
++            sensor = nil
++        }
++    }
++}
++#endif
 -- 
 2.54.0 (Apple Git-157)
 

@@ -3,17 +3,28 @@
 ## What
 
 Libre 2 pairing in the iOS Simulator, against libre2sim, an emulator of a Libre 2 sensor for
-development. Made against `next-dev` (it also applies to `main`). Everything new is in one file; the edits to existing
+development. Made against `next-dev` (it also applies to `main`). Everything new is in two new files; the edits to existing
 files are small and inert on a device:
 
 - **New:** `LibreSensor/SensorPairing/SimulatedSensorPairingService.swift`, entirely inside `#if targetEnvironment(simulator)`.
   A `SensorPairingProtocol` that asks libre2sim's HTTP API the questions `SensorPairingService` asks over CoreNFC (tag
   identifier, system info, patch info `A1`, 43 blocks of FRAM in requests of 3, then enable streaming), in the same order, and
   puts the answers through the same checks. It reads `LIBRE2SIM_URL`, default `http://127.0.0.1:8081`. Registered in the
-  `LibreTransmitter` target next to `SensorPairingService.swift`.
+  `LibreTransmitter` target next to `SensorPairingService.swift` (the notice in `LibreTransmitterUI`, next to
+  `Libre2DirectSetup.swift`).
 - `SensorPairingService.swift`: `nfcCommand` goes from `private` to `fileprivate`, and a Simulator-only extension at the end of
   the file, `SensorPairingService.enableStreamingCommand(…)`, hands the new file the command bytes from that same function, so
   the Simulator and CoreNFC paths cannot drift apart.
+- **New:** `LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift`, entirely inside `#if targetEnvironment(simulator)`,
+  shown by `Libre2DirectSetup` (3 lines, also Simulator-only). It says that in the Simulator pairing needs libre2sim rather
+  than a sensor, lists the steps (start libre2sim, run with the ImpossiBLE library, pair), checks each one it can every few
+  seconds (libre2sim reachable and its sensor's state, the library loaded), and shows why a pairing failed, which the setup
+  screen otherwise only reports to the console. Its strings are `Text(verbatim:)`: developer-only, not for the catalog.
+
+  | libre2sim running, library not loaded | libre2sim stopped, library loaded, pairing failed |
+  |---|---|
+  | ![](images/simulator-notice-ready.png) | ![](images/simulator-notice-errors.png) |
+
 - `LibreTransmitterManagerV3.pairingService` returns the simulated service on the Simulator.
 - `Features.phoneNFCAvailable` is `true` on the Simulator, so the pairing UI offers a scan.
 
@@ -49,6 +60,9 @@ files it ports are the same on `next-dev`):
   `Libre2DirectTransmitter`: scan for FDE3, match `name == MAC` and `canSupportPeripheral`, connect, discover F001 and F002, the plugin's
   own unlock write, then packets reassembled from 20 + 20 + 6 bytes, with a valid CRC and a glucose value equal to the model.
 - `tools/cbharness` also ran libre2sim's scenarios for reconnecting, out of range, low glucose, end of wear and a new sensor.
+- `tools/noticeharness`: a minimal Simulator app (no App Transport Security exceptions, like Loop) showing the notice above a
+  Pair Sensor button wired to the real service; the screenshots above are from it. `Libre2DirectSetup` itself needs LoopKitUI and
+  was not compiled outside a full build: its change is the 3-line `#if` block.
 - Not yet run: a full Loop build in the Simulator. See the scenarios in libre2sim's `docs/scenarios.md`.
 
 ## Notes

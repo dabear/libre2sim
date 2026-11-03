@@ -204,6 +204,12 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     everywhere (linkage/layout), so devicecheck could no longer prove identity. With the extension: devicecheck = 16 bytes of
     `__swift_modhash` only. Verified: xcodebuild -list parses, device typecheck + negative control, cbharness and pairharness OK.
     The LT branch `libre2_plus_eu` (2024, one line: 0xC6 → libre2) is stale; main/next-dev already have it (plus 0x7F).
+30. **Simulator notice in LT setup (user asked):** new `LibreTransmitterUI/Views/Setup/SimulatorPairingNotice.swift` (all
+    `#if simulator`, registered in the UI target), 3-line `#if` hook in `Libre2DirectSetup`, `SimulatedSensorPairingService.baseURL`
+    now public. Live checks every 3 s: GET /status (sensor state text), `NSClassFromString("CBSPeripheral")` for ImpossiBLE; shows
+    errorPublisher errors. Verified with `tools/noticeharness` (real .app, no ATS exceptions: **HTTP to 127.0.0.1 works from an
+    app**), both states screenshotted (integration/LibreTransmitter/images). devicecheck still = modhash only. Libre2DirectSetup itself
+    not compiled (needs LoopKitUI). `start.sh` builds ImpossiBLE by default (user asked), stamp-based rebuild.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -279,4 +285,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
-| 2026-11-03 | 2 | Scenarios 3, 4, 5, 7 verified with cbharness (finding 18–22); ImpossiBLE patch 0008 (19); LibreTransmitter patch shrunk (23), then moved to next-dev with its own file (29) and a devicecheck tool (25); control panel v2 (24) and restyle with sidebar (26); temperature split from calibration (27); end warmup (28); docs/running.md. Publish prep: `start.sh` (builds libre2sim + ImpossiBLE by default, stamp-based rebuild), README quick start + screenshots in docs/images, cbharness explainer, personal paths removed from tool READMEs, patch From lines = git identity. | In progress: Simulator-only 'libre2sim needed' notice in LibreTransmitter's Libre2DirectSetup (user asked). Then ask the user: GitHub owner/name/visibility, and whether HANDOFF.md/CLAUDE.md/plan docs go public. Open: §8 1, 3. |
+| 2026-11-03 | 2 | Scenarios 3, 4, 5, 7 verified with cbharness (finding 18–22); ImpossiBLE patch 0008 (19); LibreTransmitter patch shrunk (23), then moved to next-dev with its own file (29) and a devicecheck tool (25); control panel v2 (24) and restyle with sidebar (26); temperature split from calibration (27); end warmup (28); docs/running.md. Publish prep: `start.sh` (builds libre2sim + ImpossiBLE by default, stamp-based rebuild), README quick start + screenshots in docs/images, cbharness explainer, personal paths removed from tool READMEs, patch From lines = git identity. Simulator notice done (finding 30). | Next: ask the user: GitHub owner/name/visibility, and whether HANDOFF.md/CLAUDE.md/plan docs go public. Open: §8 1, 3. |
