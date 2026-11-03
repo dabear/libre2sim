@@ -157,6 +157,10 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 20. **Scenario 3 (cbharness `RECONNECT=1 FOLLOW=1`, with patch 0008):** out of range 2 min → didDisconnect, the app's
     connect is held, no advertising for 2 min, then advertise → connect completes → unlock count 4 → minute 193 decoded.
     cbharness got `FOLLOW=1` (reconnect in didDisconnect, as the proxy manager does) and `TIMEOUT=s`.
+21. **Scenario 5 (cbharness):** terminate mid-stream → hang-up, no further packets, the app's reconnect is held forever,
+    FRAM 05 with lifeCount frozen; a new pairing fails with NFC 0xB0 (LibreTransmitter logs it, UI shows nothing; finding 6).
+    Expiry (`-age 359h58m`): packets 21598, 21599, then at 21600 hang-up "the sensor has ended", no packet 21600.
+    Note: cbharness stdout to a file is buffered, so "PACKET n" can appear in the file a little late.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -166,7 +170,7 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
 | 2 | Reconnect without rescan / strict unlock | ✅ | not run |
 | 3 | Out of range | ✅ (finding 20, needed patch 0008) | not run |
 | 4 | Low glucose (e.g. fixed 55) | ✅ (finding 18) | not run |
-| 5 | Expiry / terminate | not run | not run |
+| 5 | Expiry / terminate | ✅ (finding 21) | not run |
 | 6 | Faults (badcrc, short) | ✅ (finding 16) | not run |
 | 7 | New sensor | not run | not run |
 | 8 | Beside libre3sim via impossible-mux | n/a | not run |
@@ -232,4 +236,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
-| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. Scenarios 4, 3 pass; found+fixed ImpossiBLE owner bug (0008). | in progress: scenarios 5, 7 next |
+| 2026-11-03 | 2 | Started: scenarios 3/4/5/7 via cbharness + run notes. Scenarios 4, 3 pass; found+fixed ImpossiBLE owner bug (0008). Scenario 5 passes. User asked mid-session: (a) a better control panel (current/next reading, NFC/event log, config): **delegated to a Sonnet subagent** (web.go/api.go/libre2, README API section; told not to touch tools/integration/simulator/docs/scenarios.md); (b) 'what would it take to pair with LibreTransmitter, change as little as possible': plan is to shrink the patch to 3 files (no refactor/new file/pbxproj). | in progress: scenario 7, patch shrink, UI subagent running |
