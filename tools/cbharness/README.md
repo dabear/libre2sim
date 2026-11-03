@@ -4,7 +4,7 @@ The highest-fidelity check short of a full Loop build. It runs in the iOS Simula
 `libImpossiBLE.dylib` injected, and uses **real CoreBluetooth** (`CBCentralManager`) driving
 LibreTransmitter's **real `Libre2DirectTransmitter` plugin**:
 
-1. It pairs with `SimulatedSensorPairingService` (from the integration patch) and stores
+1. It pairs with `SimulatedSensorPairingService` (LibreTransmitter #62) and stores
    `UserDefaults.standard.preSelectedSensor` as `Libre2DirectSetup` does.
 2. It then plays `LibreTransmitterProxyManager`'s part, which can't be compiled on its own because it
    imports LoopKit: scan for `Libre2DirectTransmitter.serviceUUID`, match `name == MAC` plus
@@ -15,7 +15,7 @@ LibreTransmitter's **real `Libre2DirectTransmitter` plugin**:
 `Stubs.swift` stands in for the LoopKit-only types (`DeviceLogEntryType`, `BluetoothmanagerState`,
 `LibreTransmitterDelegate`, `UserDefaults.optionalBool`).
 
-`$L2SIM` is your libre2sim checkout. Build: in LibreTransmitter (next-dev @ f3e232e, or main @ 4110512) with the integration patch applied:
+`$L2SIM` is your libre2sim checkout. Build: in LibreTransmitter next-dev (from 924e933, #62, on; for an older one, apply `integration/LibreTransmitter`'s patch first):
 
 ```bash
 H=$L2SIM/tools/cbharness
@@ -43,5 +43,7 @@ Modes (env):
   check `-strict-unlock`.
 - `FOLLOW=1`: on a drop, reconnect to the known peripheral at once, as `LibreTransmitterProxyManager` does
   (`requiresDelayedReconnect` is false for the Libre 2). Packets are counted across reconnects.
+- `TOLERATE_ERRORS=1`: print a plugin error (such as a CRC failure) and keep going, instead of failing. Use it with
+  `POST /fault {"kind":"badcrc"}` to check that the plugin decodes the packets after a bad one.
 - `TIMEOUT=s`: give up after s seconds (default 150). The harness prints `RESULT: FAIL timeout`, which is the
   expected end for a run that checks that packets stop (terminate, expiry).

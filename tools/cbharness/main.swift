@@ -14,6 +14,7 @@ let wantPackets = Int(ProcessInfo.processInfo.environment["PACKETS"] ?? "2") ?? 
 // until the sensor advertises again. TIMEOUT=s: give up after s seconds (default 150).
 let follow = ProcessInfo.processInfo.environment["FOLLOW"] == "1"
 let timeout = Double(ProcessInfo.processInfo.environment["TIMEOUT"] ?? "150") ?? 150
+let tolerateErrors = ProcessInfo.processInfo.environment["TOLERATE_ERRORS"] == "1"
 var calibration: SensorData.CalibrationInfo!
 var bag = Set<AnyCancellable>()
 
@@ -102,7 +103,13 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
     func libreDeviceReceivedMessage(_ txFlags: UInt8, payloadData: Data) {}
     func libreDeviceLogMessage(payload: String, type: DeviceLogEntryType) { print("  [plugin \(type)] \(payload.prefix(120))") }
     func libreTransmitterDidUpdate(with sensorData: SensorData, and Device: LibreTransmitterMetadata) {}
-    func libreSensorDidUpdate(with error: LibreError) { print("RESULT: FAIL plugin error \(error)"); exit(1) }
+    func libreSensorDidUpdate(with error: LibreError) {
+        if tolerateErrors {
+            print("PLUGIN ERROR \(error) (after \(packets) packets)")
+            return
+        }
+        print("RESULT: FAIL plugin error \(error)"); exit(1)
+    }
     func libreSensorDidUpdate(with bleData: Libre2.LibreBLEResponse, and Device: LibreTransmitterMetadata) {
         packets += 1
         let trend = bleData.trend.sorted { $0.idValue > $1.idValue }.map { "\($0.idValue):\(Int($0.calibratedGlucose(calibrationInfo: calibration)))" }

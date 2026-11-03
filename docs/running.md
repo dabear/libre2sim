@@ -60,9 +60,8 @@ pairing code and `Libre2DirectTransmitter` plugin. It's the quickest way to see 
 ```bash
 W=/tmp/l2work; mkdir -p $W            # any scratch directory
 
-# LibreTransmitter with the integration patch
+# LibreTransmitter next-dev (it has the Simulator pairing change from #62, 924e933, on)
 git clone -b next-dev https://github.com/LoopKit/LibreTransmitter $W/LT
-git -C $W/LT am -3 /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
 
 # The ImpossiBLE library (clones ImpossiBLE at a pinned commit and applies simulator/impossible-patches)
 sh /path/to/libre2sim/simulator/build-impossible.sh $W/imp      # → $W/imp/libImpossiBLE.dylib
@@ -83,10 +82,11 @@ and [scenarios.md](scenarios.md).
 ## 3. In Loop, in the iOS Simulator
 
 ```bash
-# 1. Patch the LibreTransmitter inside your LoopWorkspace checkout. The patch is made against LibreTransmitter next-dev
-#    (f3e232e, what LoopWorkspace next-dev pins) and also applies to main (4110512, LoopWorkspace dev) with `git am -3`.
+# 1. Put the LibreTransmitter inside your LoopWorkspace checkout on next-dev: the Simulator pairing change is there
+#    from #62 (924e933) on. For an older LibreTransmitter (main, or a LoopWorkspace that pins f3e232e or earlier),
+#    apply integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch with `git am -3` instead.
 cd LoopWorkspace/LibreTransmitter
-git am /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
+git fetch origin && git checkout origin/next-dev
 
 # 2. Start libre2sim and build ImpossiBLE (as above)
 ./libre2sim -fresh -age 3h
@@ -107,7 +107,7 @@ In Loop, go to Settings → add a CGM → **FreeStyle Libre** → the Libre 2 di
 libre2sim's `/nfc` instead of NFC. The app then finds the sensor over Bluetooth by its advertised name and receives a
 reading each minute (Loop uses one every 5 minutes).
 
-The patch is inert on a phone: everything it adds is behind `#if targetEnvironment(simulator)`. `tools/devicecheck` shows
+The change is inert on a phone: everything it adds is behind `#if targetEnvironment(simulator)`. `tools/devicecheck` shows
 the device build's code is unchanged.
 
 ## When something doesn't work

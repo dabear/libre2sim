@@ -54,16 +54,19 @@ Everything it does is also an HTTP call (see [Control API](#control-api); it lis
 
 ## Use it with Loop in the iOS Simulator
 
-1. **Patch LibreTransmitter.** The Simulator has no NFC, so a small patch lets LibreTransmitter's pairing ask libre2sim
-   instead (Simulator builds only; a device build compiles to the same code as before, see `tools/devicecheck`). In your
-   LoopWorkspace checkout:
+1. **Use LibreTransmitter `next-dev`.** The Simulator has no NFC, so in Simulator builds LibreTransmitter's pairing
+   asks libre2sim instead. That change is in LibreTransmitter `next-dev` from
+   [#62](https://github.com/LoopKit/LibreTransmitter/pull/62) (`924e933`) on; device builds compile to the same code as
+   before (see `tools/devicecheck`). In your LoopWorkspace checkout:
 
    ```bash
    cd LoopWorkspace/LibreTransmitter
-   git am -3 /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
+   git fetch origin && git checkout origin/next-dev
    ```
 
-   It is made against LibreTransmitter `next-dev` and applies to `main` too.
+   For an older LibreTransmitter (such as `main`), apply
+   [the same change as a patch](integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch) with
+   `git am -3`.
 2. **Start libre2sim** with `./start.sh`, and copy the environment variables it prints (`DYLD_INSERT_LIBRARIES`,
    `IMPOSSIBLE_SOCKET`, `LIBRE2SIM_URL`) into Loop's scheme in Xcode: Product → Scheme → Edit Scheme → Run → Arguments →
    Environment Variables. That is a local change; don't commit it.
@@ -84,7 +87,7 @@ has scenarios to try (out of range, low glucose, end of wear, faults, a new sens
 Swift code for pairing and for the Libre 2 Bluetooth plugin (`Libre2DirectTransmitter`), but no Loop and no user
 interface. It uses the real CoreBluetooth API, with the same ImpossiBLE library an app would load. When you run it, it:
 
-1. pairs with libre2sim the way LibreTransmitter does (the patched NFC step over HTTP),
+1. pairs with libre2sim the way LibreTransmitter does (the Simulator's NFC step over HTTP),
 2. scans for the sensor, connects and lets the plugin write its own unlock,
 3. decodes each packet with LibreTransmitter's code and prints the glucose values it gets,
 4. ends with `RESULT: OK`, or `RESULT: FAIL` and why.
@@ -220,7 +223,8 @@ Every check below runs LibreTransmitter's own Swift, not a re-implementation of 
   real `Libre2DirectTransmitter` plugin through pairing, scan, connect, unlock and streaming.
 
 `GO111MODULE=on go test -race ./...` runs the Go tests. [docs/scenarios.md](docs/scenarios.md) lists the manual scenarios for
-Loop and which ones have been run. The pull request for the LibreTransmitter patch is drafted in
+Loop and which ones have been run. The LibreTransmitter change was merged as
+[#62](https://github.com/LoopKit/LibreTransmitter/pull/62); its description is in
 [integration/LibreTransmitter/PR.md](integration/LibreTransmitter/PR.md).
 
 ## Credits and license
