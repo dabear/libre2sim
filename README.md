@@ -12,6 +12,75 @@ app in the iOS Simulator through [ImpossiBLE](https://github.com/mickeyl/Impossi
 > Abbott, used here solely to describe interoperability. Never use it for therapy or any clinical
 > decision.
 
+## Quick start
+
+You need a Mac with Xcode and [Go](https://go.dev/dl/) 1.20 or later (`brew install go`).
+
+```bash
+git clone https://github.com/OWNER/libre2sim && cd libre2sim
+./start.sh
+```
+
+`start.sh` builds libre2sim, builds (once) the ImpossiBLE library that lets an app in the iOS Simulator use Bluetooth,
+starts a simulated sensor that has been worn for 3 hours, and opens the control panel at http://127.0.0.1:8081/. It
+prints the three environment variables the app in the Simulator needs. Later runs resume the same sensor;
+`./start.sh -fresh -age 10m` starts a new one 10 minutes into its warmup, `./start.sh -fresh -age 0` one still in its
+applicator. Anything else you pass goes to libre2sim as flags (see [Flags](#flags)).
+
+![The control panel's dashboard: current and next reading, a 60-minute chart and the latest events](docs/images/panel-dashboard.png)
+
+<details><summary>More of the control panel</summary>
+
+| Sensor | Event log |
+|---|---|
+| ![Glucose model, link, faults and sensor life controls](docs/images/panel-sensor.png) | ![Every NFC command, BLE connect, unlock and packet](docs/images/panel-events.png) |
+| **Settings** | **On a phone** |
+| ![Launch flags, sensor identity and the strict-unlock toggle](docs/images/panel-settings.png) | ![The dashboard at phone width](docs/images/panel-phone.png) |
+
+</details>
+
+The panel shows the current reading and the **next** one with a countdown, the sensor's state, and an event log of every
+NFC command and Bluetooth event. From it you can change the glucose model (fixed, sine or random walk), drop the link,
+go out of range, spoil the next packet, activate the sensor, end its warmup early, terminate it or start a new one.
+Everything it does is also an HTTP call (see [Control API](#control-api); it listens on `-api`, default `:8081`).
+
+## Use it with Loop in the iOS Simulator
+
+1. **Patch LibreTransmitter.** The Simulator has no NFC, so a small patch lets LibreTransmitter's pairing ask libre2sim
+   instead (Simulator builds only; a device build compiles to the same code as before, see `tools/devicecheck`). In your
+   LoopWorkspace checkout:
+
+   ```bash
+   cd LoopWorkspace/LibreTransmitter
+   git am -3 /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
+   ```
+
+   It is made against LibreTransmitter `next-dev` and applies to `main` too.
+2. **Start libre2sim** with `./start.sh`, and copy the environment variables it prints (`DYLD_INSERT_LIBRARIES`,
+   `IMPOSSIBLE_SOCKET`, `LIBRE2SIM_URL`) into Loop's scheme in Xcode: Product → Scheme → Edit Scheme → Run → Arguments →
+   Environment Variables. That is a local change; don't commit it.
+3. **Run Loop on an iPhone Simulator.** In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
+   goes to libre2sim, the app finds the sensor over (simulated) Bluetooth, and a reading arrives each minute.
+
+[docs/running.md](docs/running.md) has the details and a troubleshooting table; [docs/scenarios.md](docs/scenarios.md)
+has scenarios to try (out of range, low glucose, end of wear, faults, a new sensor).
+
+## Check it without Loop: cbharness
+
+`tools/cbharness` is a small test program, not an app. It runs in the iOS Simulator and contains LibreTransmitter's own
+Swift code for pairing and for the Libre 2 Bluetooth plugin (`Libre2DirectTransmitter`), but no Loop and no user
+interface. It uses the real CoreBluetooth API, with the same ImpossiBLE library an app would load. When you run it, it:
+
+1. pairs with libre2sim the way LibreTransmitter does (the patched NFC step over HTTP),
+2. scans for the sensor, connects and lets the plugin write its own unlock,
+3. decodes each packet with LibreTransmitter's code and prints the glucose values it gets,
+4. ends with `RESULT: OK`, or `RESULT: FAIL` and why.
+
+It's the quickest way to check the whole path, minutes instead of a full Loop build, and it's how libre2sim's behaviour
+was verified: the scenarios for reconnecting, out of range, low glucose, end of wear, faults and a new sensor were all
+run through it. Its modes (reconnect with a stored sensor, follow drops, replay an unlock count) and the build command
+are in [tools/cbharness/README.md](tools/cbharness/README.md). The other tools are under [How it's verified](#how-its-verified).
+
 ## What it emulates
 
 | Part | State |
@@ -48,50 +117,19 @@ does not pin a behaviour down, libre2sim picks one and says so in the code:
 LibreTransmitter has quirks that libre2sim does not hide: it stamps trend record *i* at *now − i* minutes, which is wrong
 for records 1 to 6, it parses its receive buffer only at exactly 46 bytes, and it does no BLE backfill.
 
-## Run it with LibreTransmitter in Loop
+## Flags
 
-Step-by-step notes for all three ways to run it (on its own, with LibreTransmitter's real code via cbharness, and in
-Loop), with troubleshooting, are in [docs/running.md](docs/running.md).
+`./start.sh` passes its arguments to libre2sim; `./libre2sim -h` lists them. `-age 0` (the default for libre2sim itself;
+`start.sh` uses `-age 3h`) leaves the sensor in its applicator: scan it to activate it, or `POST /activate`. `-age` is a Go
+duration, which has no days: 14 days 23 hours is `359h`. `-warmup 5m` shortens the warmup of a new sensor, `-days 15` sets
+its wear time.
 
-The Simulator has no NFC. LibreTransmitter's pairing therefore needs a small patch for the Simulator build: it
-talks to libre2sim's `/nfc` endpoint in place of CoreNFC, and device builds are unchanged.
-
-```bash
-# 1. Patch LibreTransmitter (the copy in LoopWorkspace; the patch is made against next-dev @ f3e232e and applies to main too)
-cd LoopWorkspace/LibreTransmitter
-git am /path/to/libre2sim/integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch
-
-# 2. Build and start libre2sim
-cd /path/to/libre2sim
-GO111MODULE=on go build -o libre2sim .
-./libre2sim -fresh -age 3h          # a sensor worn for 3 hours; -fresh forgets the saved state
-
-# 3. Build the ImpossiBLE library (clones it at a pinned commit and applies simulator/impossible-patches)
-simulator/build-impossible.sh       # prints the path of libImpossiBLE.dylib
-
-# 4. Build Loop for the Simulator in Xcode, then launch it with the library injected
-SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/path/to/libImpossiBLE.dylib \
-SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock \
-SIMCTL_CHILD_LIBRE2SIM_URL=http://127.0.0.1:8081 \
-    xcrun simctl launch <simulator> <Loop's bundle id>
-```
-
-Then add LibreTransmitter in Loop, choose the Libre 2 direct connection, and scan. The scan goes to libre2sim, which
-enables streaming, and the app finds the sensor over Bluetooth by its advertised name. Readings follow each
-minute (Loop takes one every 5 minutes). `-age 0` (the default) leaves the sensor in its applicator; scan it to
-activate it or `POST /activate`. `-warmup 5m` shortens the warmup, `-days 15` sets the wear time.
-`-age` is a Go duration, which has no days: 14 days 23 hours is `359h`.
-
-From Xcode, set `DYLD_INSERT_LIBRARIES`, `IMPOSSIBLE_SOCKET` and `LIBRE2SIM_URL` under the scheme's Run →
-Arguments → Environment Variables (a local change; don't commit it). `LIBRE2SIM_URL` defaults to
-`http://127.0.0.1:8081`, and the socket to `/tmp/impossible-libre2.sock`.
-
-ImpossiBLE's menu bar app serves the same socket as the default one, so quit it first, or give libre2sim a socket of
-its own, as above. Keep socket paths short: macOS allows fewer than 104 bytes in a Unix socket path.
+`LIBRE2SIM_URL` (for the app) defaults to `http://127.0.0.1:8081`, and the socket to `/tmp/impossible-libre2.sock`.
+ImpossiBLE's menu bar app serves that same socket, so quit it first, or give libre2sim a socket of its own. Keep socket
+paths short: macOS allows fewer than 104 bytes in a Unix socket path.
 
 To run beside libre3sim, g7sim or the pod simulator in one app, give each its own `-socket` and `-api`, and join the sockets
 with g7sim's `impossible-mux`. `-simulator`, `-relaunch` and `-suspend` work as in libre3sim (see its README).
-[docs/scenarios.md](docs/scenarios.md) has the manual scenarios to run in Loop, one of them with both.
 
 | Flag | Default | |
 |---|---|---|
@@ -105,7 +143,7 @@ with g7sim's `impossible-mux`. `-simulator`, `-relaunch` and `-suspend` work as 
 | `-strict-unlock` | off | accept an unlock only with a count above the last one accepted |
 | `-simulator`, `-relaunch`, `-suspend`, `-dylib` | | as in libre3sim: relaunch a terminated app for its lodged connect, suspend it as iOS would |
 
-## Control API (`-api`, default `:8081`)
+## Control API
 
 Open `http://localhost:8081/` for a control panel, or:
 

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds ImpossiBLE's simulator library as a dylib to inject into an app at
-# launch, so the app needs no change to talk to libre3sim from the iOS Simulator.
+# launch, so the app needs no change to talk to libre2sim from the iOS Simulator.
 #
 #   simulator/build-impossible.sh [out-dir]     (default: simulator/build)
 set -eu
@@ -24,7 +24,9 @@ git -C "$src" checkout --quiet --force "$commit"
 # missing a 16-bit advert (#4), subscriptions and services surviving a
 # disconnect (#5), and retrievePeripheralsWithIdentifiers: forgetting
 # peripherals on relaunch (#6). And the socket path from IMPOSSIBLE_SOCKET, so
-# several simulators can each reach their own provider.
+# several simulators can each reach their own provider. 0008 (libre2sim's) keeps
+# the owner of a peripheral an app reconnects from didDisconnect, as
+# LibreTransmitter does; without it the reconnect never finds its services.
 for patch in "$here"/impossible-patches/*.patch; do
 	git -C "$src" apply "$patch"
 done

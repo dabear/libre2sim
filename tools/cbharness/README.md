@@ -15,10 +15,10 @@ LibreTransmitter's **real `Libre2DirectTransmitter` plugin**:
 `Stubs.swift` stands in for the LoopKit-only types (`DeviceLogEntryType`, `BluetoothmanagerState`,
 `LibreTransmitterDelegate`, `UserDefaults.optionalBool`).
 
-Build: in LibreTransmitter (next-dev @ f3e232e, or main @ 4110512) with the integration patch applied:
+`$L2SIM` is your libre2sim checkout. Build: in LibreTransmitter (next-dev @ f3e232e, or main @ 4110512) with the integration patch applied:
 
 ```bash
-H=/Users/bjorninge/Code/libre2sim/tools/cbharness
+H=$L2SIM/tools/cbharness
 F=(LibreSensor/SensorPairing/*.swift LibreSensor/SensorContents/{PreLibre2,SensorData,CRC,Measurement,SensorState,SensorSerialNumber,Sensor}.swift \
    LibreSensor/GlucoseAlgorithm/GlucoseFromRaw.swift LibreSensor/{LimitedQueue,LibreError}.swift Bluetooth/{LibreTransmitterMetadata,CBPeripheralExtensions}.swift \
    Bluetooth/Transmitter/{Libre2DirectTransmitter,LibreTransmitterProxyProtocol,UUIDContainer,MiaomiaoTransmitter,BubbleTransmitter}.swift \

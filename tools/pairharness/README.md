@@ -7,12 +7,13 @@ prints what LibreTransmitter would store: UID, patch info, MAC, FRAM CRC validit
 serial and calibration.
 
 ```bash
+L2SIM=/path/to/libre2sim
 # 1. LibreTransmitter next-dev (f3e232e) with the patch applied
 git clone -b next-dev https://github.com/LoopKit/LibreTransmitter /tmp/lt && cd /tmp/lt
-git am /Users/bjorninge/Code/libre2sim/integration/LibreTransmitter/0001-*.patch
+git am $L2SIM/integration/LibreTransmitter/0001-*.patch
 
 # 2. build (the file list avoids LoopKit/UIKit; -swift-version 5 avoids a 6.x type-checker timeout)
-H=/Users/bjorninge/Code/libre2sim/tools/pairharness
+H=$L2SIM/tools/pairharness
 F=(LibreSensor/SensorPairing/*.swift LibreSensor/SensorContents/{PreLibre2,SensorData,CRC,Measurement,SensorState,SensorSerialNumber}.swift \
    LibreSensor/GlucoseAlgorithm/GlucoseFromRaw.swift Bluetooth/LibreTransmitterMetadata.swift Common/LocalizedString.swift \
    Common/Extensions/{DataExtensions,DateExtensions,DoubleExtensions,TimeIntervalExtensions}.swift Features.swift)
