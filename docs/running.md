@@ -27,9 +27,15 @@ Open **http://localhost:8081/** for the control panel. A dark sidebar (it collap
 to four pages:
 
 - **Dashboard**: the sensor minute and wear left, the phone's connection, unlocks and the glucose model; the current
-  glucose (mg/dL and mmol/L) with its trend, the **next reading** with a countdown to when it is sent, a 60-minute chart,
-  and the latest events. The next value is exact for `fixed` and `sine`. For `walk` it's an estimate (≈), because the
-  walk's noise is drawn when the minute arrives.
+  glucose (mg/dL and mmol/L) with its trend, the **next reading** with a countdown to when it is sent, a chart, and the
+  latest events. The next value is exact for `fixed` and `sine`. For `walk` it's an estimate (≈), because the walk's
+  noise is drawn when the minute arrives.
+
+  The chart shows the last 60 minutes, a line marking **now**, and the **next 15 readings** as a dashed line. For `walk`
+  the coming readings are the expected path, with a band where about 95% of the random readings will fall. Markers
+  show where a warmup ends ("first reading") or the wear ends within that window. **Hover over (or tap) a minute** for
+  its reading and the raw values its BLE record carries: the raw glucose, what LibreTransmitter computes from it, the
+  raw temperature fields, and the 4-byte record, each with a short explanation.
 - **Sensor**: change the glucose model, drop the link or go out of range, spoil the next packet, activate, terminate or
   replace the sensor; and the full status.
 - **Event log**: every NFC command and answer (with hex and error codes), BLE connects, unlocks, packets, faults and sensor

@@ -1,6 +1,7 @@
 package libre2
 
 import (
+	"fmt"
 	"math"
 	"time"
 )
@@ -8,6 +9,9 @@ import (
 // walkNoiseSD is the standard deviation of the walk model's per-minute noise
 // (see State.model).
 const walkNoiseSD = 0.8
+
+// walkReversion is how far the walk model moves toward its value each minute.
+const walkReversion = 0.02
 
 // NextReading is the reading the sensor will make up at the next minute.
 type NextReading struct {
@@ -35,36 +39,59 @@ type Trend struct {
 }
 
 // nextReading is the next minute's reading at now, with mu held, or nil when
-// there is none (not running). It does not touch the model's random
-// sequence: fixed and sine are pure functions of the minute, and for walk it
-// returns the model's mean, not a draw.
+// there is none (not running).
 func (s *Sensor) nextReading(now time.Time) *NextReading {
+	up, _ := s.upcoming(now, 1)
+	if len(up) == 0 {
+		return nil
+	}
+	return &up[0]
+}
+
+// upcoming is the readings of the next n minutes at now, with mu held, and the
+// minute the sensor's wear ends if that is within them (else 0). It does not
+// touch the model's random sequence: fixed and sine are pure functions of the
+// minute, and for walk it returns the model's mean, not a draw, with the
+// spread of the draws that far ahead.
+func (s *Sensor) upcoming(now time.Time, n int) ([]NextReading, int) {
 	st := s.state
 	if !st.running(now) {
-		return nil
+		return nil, 0
 	}
 	lc := st.lifeCount(now)
-	next := lc + 1
-	if next >= st.WearMinutes {
-		return nil
-	}
 	st.fill(lc)
-	at := st.Activated.Add(time.Duration(next) * time.Minute)
-	n := &NextReading{Minute: next, At: at.Format(time.RFC3339), AtMs: at.UnixNano() / int64(time.Millisecond),
-		InSecs: math.Max(0, at.Sub(now).Seconds())}
-	if next < st.WarmupMinutes {
-		n.Warmup = true
-		return n
+	walk := st.Glucose.Kind == "walk"
+	prev := st.walkPrev()
+	var variance float64
+	var out []NextReading
+	for k := 1; k <= n; k++ {
+		m := lc + k
+		if m >= st.WearMinutes {
+			return out, st.WearMinutes
+		}
+		at := st.Activated.Add(time.Duration(m) * time.Minute)
+		r := NextReading{Minute: m, At: at.Format(time.RFC3339), AtMs: at.UnixNano() / int64(time.Millisecond),
+			InSecs: math.Max(0, at.Sub(now).Seconds())}
+		var v float64
+		switch {
+		case m < st.WarmupMinutes:
+			r.Warmup = true
+		case walk:
+			// Each minute moves 2% of the way to Value, plus noise; the mean
+			// follows the same path and the noise adds up.
+			prev += (st.Glucose.Value - prev) * walkReversion
+			variance = variance*(1-walkReversion)*(1-walkReversion) + walkNoiseSD*walkNoiseSD
+			r.Estimate, r.NoiseSD = true, math.Round(math.Sqrt(variance)*100)/100
+			v = prev
+		default:
+			v = st.model(m)
+		}
+		if !r.Warmup {
+			r.MgDl = int(math.Round(clampGlucose(v)))
+		}
+		out = append(out, r)
 	}
-	var v float64
-	if st.Glucose.Kind == "walk" {
-		n.Estimate, n.NoiseSD = true, walkNoiseSD
-		v = st.walkMean()
-	} else {
-		v = st.model(next)
-	}
-	n.MgDl = int(math.Round(clampGlucose(v)))
-	return n
+	return out, 0
 }
 
 // trend is the latest reading's trend at now, with mu held.
@@ -97,17 +124,54 @@ type History struct {
 	Values []uint16     `json:"mgdl"`
 	Next   *NextReading `json:"next,omitempty"`
 	Trend  *Trend       `json:"trend,omitempty"`
+	// Ahead is the readings of the next minutes, when asked for; WearEnds is
+	// the minute the wear ends if that comes first (no readings from then).
+	Ahead    []NextReading `json:"ahead,omitempty"`
+	WearEnds int           `json:"wearEnds,omitempty"`
+	// Records is how each of Values goes over BLE, index for index; Ahead's
+	// are in AheadRecords. Calibration and Temperature are what the app needs
+	// besides a record's raw glucose to compute glucose from it.
+	Records      []RecordDetail         `json:"records"`
+	AheadRecords []RecordDetail         `json:"aheadRecords,omitempty"`
+	Calibration  map[string]int         `json:"calibration,omitempty"`
+	Temperature  map[string]interface{} `json:"temperature,omitempty"`
+	ActivatedMs  int64                  `json:"activatedMs,omitempty"`
 }
 
-// History returns up to the last minutes readings.
-func (s *Sensor) History(minutes int, now time.Time) History {
+// RecordDetail is a reading as a BLE packet record carries it.
+type RecordDetail struct {
+	// Raw is the 14-bit raw glucose, 0 for a minute without a reading.
+	Raw int `json:"raw"`
+	// AppMgDl is the unrounded mg/dL LibreTransmitter computes from Raw
+	// (glucoseValueFromRaw); 0 when Raw is 0.
+	AppMgDl float64 `json:"appMgdl"`
+	// BLE is the 4-byte record, in hex.
+	BLE string `json:"ble"`
+}
+
+// recordDetail is how mgdl goes over BLE with the calibration c.
+func recordDetail(c Calibration, mgdl uint16) RecordDetail {
+	raw := c.rawForGlucose(mgdl)
+	b := make([]byte, bleRecordSize)
+	putBLERecord(b, raw, c.RawTemperature, c.RawTemperatureAdjustment)
+	d := RecordDetail{Raw: int(raw), BLE: fmt.Sprintf("% x", b)}
+	if raw != 0 {
+		d.AppMgDl = math.Round(c.mgdlForRaw(int(raw))*100) / 100
+	}
+	return d
+}
+
+// History returns up to the last minutes readings, and the next ahead ones.
+func (s *Sensor) History(minutes, ahead int, now time.Time) History {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	h := History{Values: []uint16{}}
+	h := History{Values: []uint16{}, Records: []RecordDetail{}}
 	if st.Activated == nil {
 		return h
 	}
+	h.Calibration, h.Temperature = st.Calibration.info(), st.Calibration.measurementTemperature()
+	h.ActivatedMs = st.Activated.UnixNano() / int64(time.Millisecond)
 	lc := st.framMinutes(now)
 	st.fill(lc)
 	first := lc - minutes + 1
@@ -116,9 +180,17 @@ func (s *Sensor) History(minutes int, now time.Time) History {
 	}
 	h.Minute, h.FirstMinute = lc, first
 	for i := first; i <= lc; i++ {
-		h.Values = append(h.Values, st.reading(i))
+		v := st.reading(i)
+		h.Values = append(h.Values, v)
+		h.Records = append(h.Records, recordDetail(st.Calibration, v))
 	}
 	h.Next, h.Trend = s.nextReading(now), s.trend(now)
+	if ahead > 0 {
+		h.Ahead, h.WearEnds = s.upcoming(now, ahead)
+		for _, r := range h.Ahead {
+			h.AheadRecords = append(h.AheadRecords, recordDetail(st.Calibration, uint16(r.MgDl)))
+		}
+	}
 	return h
 }
 
@@ -126,10 +198,14 @@ func clampGlucose(v float64) float64 { return math.Max(40, math.Min(400, v)) }
 
 // walkMean is the mean of the walk model's next value.
 func (s *State) walkMean() float64 {
-	m := s.Glucose
-	prev := m.Value
+	prev := s.walkPrev()
+	return prev + (s.Glucose.Value-prev)*walkReversion
+}
+
+// walkPrev is the value the walk model's next step starts from.
+func (s *State) walkPrev() float64 {
 	if n := len(s.Readings); n > 0 && s.Readings[n-1] != 0 {
-		prev = float64(s.Readings[n-1])
+		return float64(s.Readings[n-1])
 	}
-	return prev + (m.Value-prev)*0.02
+	return s.Glucose.Value
 }

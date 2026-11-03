@@ -177,7 +177,7 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | Endpoint | What it does |
 |---|---|
 | `GET /` | the control panel |
-| `GET /readings` | `?minutes=60` (1 to 1440): `{"minute","firstMinute","mgdl":[…],"next":{…},"trend":{…}}`, the latest readings oldest first (0 is no reading, in warmup) |
+| `GET /readings` | `?minutes=60` (1 to 1440) `&ahead=15` (0 to 60): `{"minute","firstMinute","mgdl":[…],"records":[…],"next":{…},"trend":{…},"ahead":[…],"aheadRecords":[…],"wearEnds","calibration","temperature"}`. The latest readings oldest first (0 is no reading, in warmup), each one's BLE record (`raw`, `appMgdl` the app computes from it, `ble` hex), and the next `ahead` readings (`estimate` and `noiseSD` for the walk model; `wearEnds` if the wear ends first) |
 | `GET /events` | `?since=<seq>`: `{"last":seq,"events":[{"seq","time","cat","kind","msg"}]}`, oldest first. `cat` is `nfc`, `ble` or `sensor`. The latest 200 events are kept in memory, so a restart (`/new`) empties them |
 | `GET /config` | `{"launch":{version, statePath, api, socket, fresh, days, warmupMinutes, ageMinutes, simulator, relaunch, suspend, dylib},"strictUnlock":bool,"sensor":{uid, serial, patchInfo, bleAddress, advertisedName, calibration (i1…i6), temperature, …}}` |
 | `POST /config` | `{"strictUnlock":true}`: toggle strict unlock at run time (the only setting that is safe to change live); answers like `GET /config`. 400 on anything else |

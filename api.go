@@ -24,8 +24,10 @@ import (
 //	GET  /                       the control panel (web.go)
 //	GET  /status                 the sensor and its latest reading; "fault" is
 //	                             there while a fault is armed
-//	GET  /readings?minutes=60    the latest readings (mg/dL by minute, oldest
-//	                             first) with the next reading and the trend
+//	GET  /readings?minutes=60&ahead=15
+//	                             the latest readings (mg/dL by minute, oldest
+//	                             first) with the next reading and the trend, and
+//	                             the next `ahead` readings (0 to 60; none by default)
 //	GET  /events?since=<seq>     the event log, oldest first: {"last":seq,
 //	                             "events":[{seq,time,cat,kind,msg}]}
 //	GET  /config                 the launch configuration and the sensor's identity
@@ -116,7 +118,14 @@ func newAPI(sensor *libre2.Sensor) *api {
 		if minutes > 1440 {
 			minutes = 1440
 		}
-		writeJSON(w, sensor.History(minutes, time.Now()))
+		ahead, _ := strconv.Atoi(r.URL.Query().Get("ahead"))
+		if ahead < 0 {
+			ahead = 0
+		}
+		if ahead > 60 {
+			ahead = 60
+		}
+		writeJSON(w, sensor.History(minutes, ahead, time.Now()))
 	})
 	a.mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)

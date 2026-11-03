@@ -98,6 +98,21 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
 .spark { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .area { fill: var(--accent-soft); stroke: none; }
 .axis { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.future { fill: var(--soft); opacity: .6; }
+.band { fill: var(--accent-soft); opacity: .7; stroke: none; }
+.now { stroke: var(--fg); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.nowlabel { font-size: 10px; font-weight: 600; fill: var(--fg); }
+.chartwrap { position: relative; }
+.chartwrap svg.chart { cursor: crosshair; touch-action: pan-y; }
+.hoverline { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.tip { position: absolute; top: 4px; z-index: 5; width: 330px; max-width: calc(100% - 8px); background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(20, 30, 60, .14); padding: 10px 12px; font-size: 12.5px; pointer-events: none; }
+.tip h4 { margin: 0 0 2px; font-size: 13px; }
+.tip .big { font-size: 17px; font-weight: 700; margin: 2px 0 4px; }
+.tip .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font-weight: 600; }
+.tip .row code { font-weight: 500; }
+.tip .why { color: var(--muted); margin-top: 1px; font-size: 11.5px; line-height: 1.35; }
+.marker { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 .axislabel { fill: var(--muted); font-size: 10px; }
 
 .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -164,8 +179,9 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
           <div class="sub">sent in <b id="countdown">&mdash;</b></div>
           <div class="sub" id="nextNote">&nbsp;</div></div>
       </div>
-      <svg class="chart" id="chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img" aria-label="Glucose over the last 60 minutes"></svg>
-      <p class="note">The last 60 sensor minutes. The hollow dot is the next reading.</p></div>
+      <div class="chartwrap"><svg class="chart" id="chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img" aria-label="Glucose over the last 60 minutes and the next 15"></svg>
+        <div class="tip" id="tip" hidden></div></div>
+      <p class="note" id="chartNote">The last 60 sensor minutes and the next 15, after the line marked now. The large hollow dot is the next reading. Hover over a minute for its raw values.</p></div>
     <div class="card"><h2>Recent events</h2><div class="log" id="recent"></div>
       <p class="note"><a href="#events">All events &rarr;</a></p></div>
   </div>
@@ -271,17 +287,22 @@ function tickCountdown() {
 function drawChart(h) {
   const svg = el('chart'); svg.replaceChildren();
   const ns = 'http://www.w3.org/2000/svg';
-  const vals = h.mgdl || [];
+  const vals = h.mgdl || [], first = h.firstMinute || 0;
   const pts = [];
   vals.forEach((v, i) => { if (v > 0) pts.push([i, v]); });
-  const next = h.next && h.next.mgdl > 0 ? [vals.length, h.next.mgdl] : null;
-  if (!pts.length) return;
-  const all = pts.map(p => p[1]).concat(next ? [next[1]] : []);
+  // The coming minutes, at their place after the latest reading; warmup ones
+  // have no reading. A walk's are its mean path, with ±2 SD around it.
+  const ahead = (h.ahead || []).map(r => ({i: r.minute - first, v: r.mgdl, sd: r.estimate ? r.noiseSD : 0, warmup: r.warmup}));
+  const fut = ahead.filter(r => !r.warmup && r.v > 0);
+  if (!pts.length && !fut.length) return;
+  const all = pts.map(p => p[1]).concat(fut.map(r => r.v - 2 * r.sd), fut.map(r => r.v + 2 * r.sd));
   let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
   if (hi - lo < 20) { const m = (hi + lo) / 2; lo = m - 10; hi = m + 10; }
   lo -= 5; hi += 5;
-  const n = Math.max(vals.length + (next ? 1 : 0) - 1, 1);
-  const x = i => 30 + (i / n) * 562, y = v => 170 - ((v - lo) / (hi - lo)) * 160;
+  const end = Math.max(vals.length - 1 + 15, ahead.length ? ahead[ahead.length - 1].i : 0, h.wearEnds ? h.wearEnds - first : 0);
+  const n = Math.max(end, 1);
+  const x = i => 30 + (i / n) * 562, y = v => 162 - ((v - lo) / (hi - lo)) * 150;
+  chartGeo = {h: h, n: n, x: x, y: y, first: first, latest: vals.length - 1, ahead: ahead};
   function add(tag, attrs, text) {
     const e = document.createElementNS(ns, tag);
     for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -292,15 +313,120 @@ function drawChart(h) {
     add('line', {x1: 30, x2: 592, y1: y(v), y2: y(v), 'class': 'axis'});
     add('text', {x: 0, y: y(v) + 3, 'class': 'axislabel'}, String(Math.round(v)));
   });
-  const line = pts.map(p => x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1));
-  add('polygon', {points: x(pts[0][0]).toFixed(1) + ',170 ' + line.join(' ') + ' ' + x(pts[pts.length - 1][0]).toFixed(1) + ',170', 'class': 'area'});
-  add('polyline', {points: line.join(' '), 'class': 'spark'});
-  const last = pts[pts.length - 1];
-  add('circle', {cx: x(last[0]), cy: y(last[1]), r: 4, fill: 'var(--accent)'});
-  if (next) {
-    add('line', {x1: x(last[0]), y1: y(last[1]), x2: x(next[0]), y2: y(next[1]), 'class': 'spark', 'stroke-dasharray': '4 4'});
-    add('circle', {cx: x(next[0]), cy: y(next[1]), r: 4, fill: 'var(--card)', stroke: 'var(--accent)', 'stroke-width': 2});
+  // Now: the latest minute plus how far the clock is into the next one.
+  const latest = vals.length - 1;
+  const into = h.next ? Math.min(Math.max(1 - h.next.inSeconds / 60, 0), 1) : 0;
+  const nowX = x(latest + into);
+  if (fut.length) {
+    add('rect', {x: nowX, y: 8, width: Math.max(592 - nowX, 0), height: 158, 'class': 'future'});
   }
+  if (pts.length) {
+    const line = pts.map(p => x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1));
+    add('polygon', {points: x(pts[0][0]).toFixed(1) + ',166 ' + line.join(' ') + ' ' + x(pts[pts.length - 1][0]).toFixed(1) + ',166', 'class': 'area'});
+    add('polyline', {points: line.join(' '), 'class': 'spark'});
+  }
+  if (fut.some(r => r.sd > 0)) {
+    const up = fut.map(r => x(r.i).toFixed(1) + ',' + y(r.v + 2 * r.sd).toFixed(1));
+    const down = fut.slice().reverse().map(r => x(r.i).toFixed(1) + ',' + y(r.v - 2 * r.sd).toFixed(1));
+    add('polygon', {points: up.concat(down).join(' '), 'class': 'band'});
+  }
+  const last = pts[pts.length - 1];
+  if (fut.length) {
+    const path = (last && fut[0].i === last[0] + 1 ? [last] : []).concat(fut.map(r => [r.i, r.v]));
+    add('polyline', {points: path.map(p => x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(' '), 'class': 'spark', 'stroke-dasharray': '4 4'});
+  }
+  // Marks: where the warmup ends and where the wear ends, inside the window.
+  const firstReading = ahead.find(r => !r.warmup);
+  if (ahead.length && ahead[0].warmup && firstReading) mark(firstReading.i, 'first reading');
+  if (h.wearEnds) mark(h.wearEnds - first, 'wear ends');
+  function mark(i, label) {
+    add('line', {x1: x(i), x2: x(i), y1: 8, y2: 166, 'class': 'marker'});
+    add('text', {x: Math.min(x(i) + 4, 540), y: 18, 'class': 'axislabel'}, label);
+  }
+  add('line', {x1: nowX, x2: nowX, y1: 4, y2: 166, 'class': 'now'});
+  add('text', {x: Math.min(nowX + 4, 570), y: 176, 'class': 'nowlabel'}, 'now');
+  add('text', {x: 30, y: 176, 'class': 'axislabel'}, '−' + latest + ' min');
+  if (fut.length) add('text', {x: 592, y: 176, 'class': 'axislabel', 'text-anchor': 'end'}, '+' + (n - latest) + ' min');
+  if (last) add('circle', {cx: x(last[0]), cy: y(last[1]), r: 4, fill: 'var(--accent)'});
+  fut.forEach((r, k) => add('circle', {cx: x(r.i), cy: y(r.v), r: k === 0 && h.next && r.i === h.next.minute - first ? 4 : 2.2,
+    fill: 'var(--card)', stroke: 'var(--accent)', 'stroke-width': k === 0 ? 2 : 1.4, 'vector-effect': 'non-scaling-stroke'}));
+  if (hoverMinute !== null) showTip(hoverMinute - first);
+}
+
+// Hover: the minute under the pointer, with its reading and the raw values
+// the BLE packet carries for it.
+let chartGeo = null, hoverMinute = null;
+function hoverAt(ev) {
+  if (!chartGeo) return;
+  const svg = el('chart'), r = svg.getBoundingClientRect();
+  const vx = (ev.clientX - r.left) / r.width * 600;
+  const g = chartGeo, last = g.ahead.length ? g.ahead[g.ahead.length - 1].i : g.latest;
+  const i = Math.max(0, Math.min(last, Math.round((vx - 30) / 562 * g.n)));
+  hoverMinute = g.first + i;
+  showTip(i);
+}
+function hideTip() {
+  hoverMinute = null; el('tip').hidden = true;
+  const old = el('chart').querySelector('.hover'); if (old) old.remove();
+}
+function showTip(i) {
+  const g = chartGeo, h = g.h, tip = el('tip'), svg = el('chart');
+  let v, rec, ahead = null;
+  if (i <= g.latest) { v = h.mgdl[i]; rec = (h.records || [])[i]; }
+  else {
+    const k = g.ahead.findIndex(a => a.i === i);
+    if (k < 0) { hideTip(); return; }
+    ahead = h.ahead[k]; v = ahead.mgdl; rec = (h.aheadRecords || [])[k];
+  }
+  // The guide line and dot.
+  const old = svg.querySelector('.hover'); if (old) old.remove();
+  const ns = 'http://www.w3.org/2000/svg', grp = document.createElementNS(ns, 'g');
+  grp.setAttribute('class', 'hover');
+  const ln = document.createElementNS(ns, 'line');
+  [['x1', g.x(i)], ['x2', g.x(i)], ['y1', 8], ['y2', 166], ['class', 'hoverline']].forEach(a => ln.setAttribute(a[0], a[1]));
+  grp.append(ln);
+  if (v > 0) {
+    const c = document.createElementNS(ns, 'circle');
+    [['cx', g.x(i)], ['cy', g.y(v)], ['r', 5], ['fill', 'none'], ['stroke', 'var(--fg)'], ['stroke-width', 1.5], ['vector-effect', 'non-scaling-stroke']].forEach(a => c.setAttribute(a[0], a[1]));
+    grp.append(c);
+  }
+  svg.append(grp);
+
+  const minute = g.first + i;
+  const at = h.activatedMs ? new Date(h.activatedMs + minute * 60000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+  tip.replaceChildren();
+  function add(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; tip.append(e); return e; }
+  function row(k, val, why) {
+    const r = add('div', 'row'); const a = document.createElement('span'); a.textContent = k;
+    const b = document.createElement('code'); b.textContent = val; r.append(a, b);
+    if (why) add('div', 'why', why);
+  }
+  add('h4', '', 'Minute ' + minute + (at ? ' · ' + at : '') + (ahead ? ' · coming' : (i === g.latest ? ' · latest' : '')));
+  if (!(v > 0)) {
+    add('div', 'big', 'No reading');
+    add('div', 'why', 'Still in warmup: the record\'s raw glucose is 0, and the app skips records like that.');
+    if (rec) row('BLE record', rec.ble, 'Raw 0, with the usual temperature fields.');
+  } else {
+    add('div', 'big', (ahead && ahead.estimate ? '≈ ' : '') + v + ' mg/dL · ' + mmol(v) + ' mmol/L');
+    if (ahead) add('div', 'why', ahead.estimate
+      ? 'An estimate: the walk model adds random noise when the minute arrives; about 95% of readings fall within ±' + (2 * ahead.noiseSD).toFixed(1) + ' mg/dL of this. The raw values below are for this estimate.'
+      : 'Exact: sent at ' + new Date(ahead.atMs).toLocaleTimeString() + '. The model is deterministic, so this is what the sensor will send.');
+    else add('div', 'why', 'The value libre2sim made up for this minute (the parsed reading).');
+    if (rec) {
+      const c = h.calibration || {};
+      row('Raw glucose', String(rec.raw),
+        'Bits 0–13 of the record. The app computes 65·(raw − i3)/(i4 − i3) with the sensor\'s calibration (i3 = ' + c.i3 + ', i4 = ' + c.i4 + '), corrects it for temperature and applies its i2 = ' + c.i2 + ' tables; libre2sim picks the raw value that comes back as this reading.');
+      row('App computes', rec.appMgdl.toFixed(2) + ' mg/dL', 'LibreTransmitter\'s result before rounding, and before any slope or offset set in the app.');
+    }
+    const t = h.temperature;
+    if (t) row('Raw temperature', t.raw + ', adj. ' + signed(t.adjustment),
+      'Bits 14–25 hold ' + t.raw + ' >> 2, bits 26–30 the adjustment >> 2 and bit 31 its sign. With i6 = ' + (h.calibration || {}).i6 + ': ' + t.celsius + ' °C. The same in every record libre2sim writes.');
+    if (rec) row('BLE record', rec.ble, 'These fields as the packet carries them (before encryption), least significant bit first.');
+  }
+  tip.hidden = false;
+  // Beside the pointer's minute, on whichever side has room.
+  const wrapW = svg.parentElement.clientWidth, px = g.x(i) / 600 * svg.clientWidth, w = tip.offsetWidth;
+  tip.style.left = (px + 14 + w <= wrapW ? px + 14 : Math.max(0, px - 14 - w)) + 'px';
 }
 
 function showReadings(s, h) {
@@ -333,7 +459,12 @@ function showReadings(s, h) {
     el('nextNote').textContent = s.activated ? 'the sensor is not running' : 'not activated';
   }
   tickCountdown();
-  if (h) drawChart(h);
+  if (h) {
+    drawChart(h);
+    const est = (h.ahead || []).some(r => r.estimate);
+    el('chartNote').textContent = 'The last 60 sensor minutes and the next 15, after the line marked now. The large hollow dot is the next reading. Hover over (or tap) a minute for its raw values. ' +
+      (est ? 'The coming readings are the walk model\'s expected path; the shaded band is where about 95% of its random readings will fall.' : 'The coming readings are exact: the model is deterministic.');
+  }
 }
 
 function pill(text, cls) {
@@ -428,11 +559,15 @@ async function loadConfig() {
 
 async function refresh() {
   try {
-    const [s, h] = await Promise.all([fetch('/status').then(r => r.json()), fetch('/readings?minutes=60').then(r => r.json())]);
+    const [s, h] = await Promise.all([fetch('/status').then(r => r.json()), fetch('/readings?minutes=60&ahead=15').then(r => r.json())]);
     showReadings(s, h); showStatus(s);
     await pollEvents();
   } catch (e) {}
 }
+el('chart').addEventListener('pointermove', hoverAt);
+el('chart').addEventListener('pointerdown', hoverAt);
+el('chart').addEventListener('pointerleave', ev => { if (ev.pointerType !== 'touch') hideTip(); });
+document.addEventListener('pointerdown', ev => { if (hoverMinute !== null && !el('chart').contains(ev.target)) hideTip(); });
 route(); buildFilters(); loadConfig(); refresh();
 setInterval(refresh, 1500); setInterval(tickCountdown, 250);
 </script></body></html>`
