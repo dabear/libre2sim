@@ -27,6 +27,8 @@ git -C "$src" checkout --quiet --force "$commit"
 # several simulators can each reach their own provider. 0008 (libre2sim's) keeps
 # the owner of a peripheral an app reconnects from didDisconnect, as
 # LibreTransmitter does; without it the reconnect never finds its services.
+# 0009 (libre2sim's) keeps the library inert in the simulator's own processes,
+# so start.sh can set DYLD_INSERT_LIBRARIES for a whole simulator.
 for patch in "$here"/impossible-patches/*.patch; do
 	git -C "$src" apply "$patch"
 done

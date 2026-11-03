@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bj=C3=B8rn=20Inge=20Berg?= <bjorninge-git@bjorninge.no>
+Date: Tue, 3 Nov 2026 14:20:00 +0100
+Subject: [PATCH] Stay out of the simulator's own processes
+
+With DYLD_INSERT_LIBRARIES set for a whole simulator (launchctl setenv), so
+that an app gets ImpossiBLE however it is launched, every process the
+simulator starts loads the library, its daemons and Apple's apps included,
+and their CoreBluetooth would go to the provider. Do nothing in a process
+whose executable lives in the simulator runtime (IPHONE_SIMULATOR_ROOT, or
+SIMULATOR_ROOT, which the runtime's own tools get from simctl spawn).
+Installed apps, and harnesses started with simctl spawn from elsewhere, are
+not in the runtime and work as before.
+---
+--- a/Sources/ImpossiBLE/CBSActivator.m
++++ b/Sources/ImpossiBLE/CBSActivator.m
+@@ -1961,6 +1961,17 @@
+ @implementation CBSActivator
+ 
+ + (void)load {
++    // Loaded with DYLD_INSERT_LIBRARIES set for the whole simulator, every
++    // process gets this library, system daemons and Apple's apps included.
++    // Stay out of those: their executables live in the simulator runtime.
++    NSString *executable = NSBundle.mainBundle.executablePath;
++    for (NSString *name in @[@"IPHONE_SIMULATOR_ROOT", @"SIMULATOR_ROOT"]) {
++        const char *root = getenv(name.UTF8String);
++        if (root && *root && [executable hasPrefix:@(root)]) {
++            return;
++        }
++    }
++
+     NSLog(@"ImpossiBLE: loaded");
+ 
+     Class cls = NSClassFromString(@"CBCentralManager");
+-- 
+2.54.0 (Apple Git-157)
+

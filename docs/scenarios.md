@@ -200,7 +200,7 @@ Run both emulators, each with its own socket and API port, and join the sockets 
 flags):
 
 ```bash
-./libre2sim -fresh -age 3h -api 127.0.0.1:8081 -socket /tmp/impossible-libre2.sock
+./libre2sim -fresh -age 3h -api 127.0.0.1:8081 -socket /tmp/impossible.sock
 ../libre3sim/libre3sim -fresh -age 3h -api 127.0.0.1:8080 -socket /tmp/impossible-libre3.sock
 # impossible-mux: serve /tmp/impossible.sock, forwarding to the two sockets above
 ```

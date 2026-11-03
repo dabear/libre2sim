@@ -28,10 +28,10 @@ xcrun -sdk iphonesimulator swiftc -swift-version 5 -target arm64-apple-ios17.0-s
   -module-cache-path /tmp/cb-mc -Xfrontend -import-module -Xfrontend Foundation -o /tmp/cbharness "${F[@]}" $H/{Stubs,main}.swift
 ```
 
-Run (libre2sim on `/tmp/impossible-libre2.sock`; dylib from `simulator/build-impossible.sh`):
+Run (libre2sim on `/tmp/impossible.sock`; dylib from `simulator/build-impossible.sh`):
 
 ```bash
-SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/path/libImpossiBLE.dylib SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock \
+SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/path/libImpossiBLE.dylib SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible.sock \
 SIMCTL_CHILD_PACKETS=2 xcrun simctl spawn "iPhone 16" /tmp/cbharness
 ```
 

@@ -71,7 +71,7 @@ sh /path/to/libre2sim/simulator/build-impossible.sh $W/imp      # → $W/imp/lib
 # Run
 ./libre2sim -fresh -age 3h &
 xcrun simctl boot "iPhone 16"
-SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=$W/imp/libImpossiBLE.dylib SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock \
+SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=$W/imp/libImpossiBLE.dylib \
 SIMCTL_CHILD_PACKETS=2 xcrun simctl spawn "iPhone 16" $W/cbharness       # ends with RESULT: OK
 ```
 
@@ -92,15 +92,14 @@ git fetch origin && git checkout origin/next-dev
 ./libre2sim -fresh -age 3h
 sh /path/to/libre2sim/simulator/build-impossible.sh /tmp/imp
 
-# 3. In Xcode: the Loop scheme → Edit Scheme → Run → Arguments → Environment Variables (a local change; don't commit it):
-#      DYLD_INSERT_LIBRARIES = /tmp/imp/libImpossiBLE.dylib
-#      IMPOSSIBLE_SOCKET     = /tmp/impossible-libre2.sock
-#      LIBRE2SIM_URL         = http://127.0.0.1:8081            (the default)
-#    then build and run Loop on an iPhone Simulator.
-#    Or from the command line, after building:
-SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/tmp/imp/libImpossiBLE.dylib \
-SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock \
-    xcrun simctl launch booted <Loop's bundle identifier>
+# 3. The app needs the library: ./start.sh sets DYLD_INSERT_LIBRARIES inside every booted Simulator for you
+#    (launchctl setenv; the library stays inert in the Simulator's own processes, impossible-patches/0009), and
+#    removes it on Ctrl-C. By hand, either set it for the whole Simulator:
+xcrun simctl spawn booted launchctl setenv DYLD_INSERT_LIBRARIES /tmp/imp/libImpossiBLE.dylib
+#    or only in Loop's scheme (Edit Scheme → Run → Arguments → Environment Variables; don't commit it), or per launch:
+SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/tmp/imp/libImpossiBLE.dylib xcrun simctl launch booted <Loop's bundle identifier>
+#    Use the path's real letter case: the Simulator's dyld matches it case-sensitively.
+#    IMPOSSIBLE_SOCKET and LIBRE2SIM_URL are only needed if you change -socket or -api.
 ```
 
 In Loop, go to Settings → add a CGM → **FreeStyle Libre** → the Libre 2 direct connection, and scan. The "scan" calls
@@ -114,6 +113,7 @@ the device build's code is unchanged.
 
 | Symptom | Cause |
 |---|---|
+| Pairing works but the app never connects; the panel shows no `connect` | the app doesn't have the ImpossiBLE library. It was already running when `./start.sh` set it up (quit it and run it again), the Simulator was booted after `./start.sh` (run it again), or the path's letter case differs from the real one (the Simulator's dyld is case-sensitive; `start.sh` uses `/bin/pwd -P`) |
 | The scan fails with "libre2sim is not running at …" | libre2sim isn't listening on `LIBRE2SIM_URL` (default `127.0.0.1:8081`) |
 | The scan fails with NFC error `0xB0` | the sensor is still in its applicator (`POST /activate`), ended, or terminated (`POST /new` for another) |
 | The app never finds the sensor | it advertises only after a scan enabled streaming, while no phone holds the link and it is in range. Check `advertising` in the panel |

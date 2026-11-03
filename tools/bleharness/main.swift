@@ -6,13 +6,13 @@
 // real decryptBLE / parseBLEData / calibratedGlucose.
 //
 // Usage (env): LIBRE2SIM_URL (default http://127.0.0.1:8081),
-//              IMPOSSIBLE_SOCKET (default /tmp/impossible-libre2.sock),
+//              IMPOSSIBLE_SOCKET (default /tmp/impossible.sock),
 //              UNLOCK_COUNT (default 1), PACKETS (default 1)
 import Foundation
 
 let env = ProcessInfo.processInfo.environment
 let base = URL(string: env["LIBRE2SIM_URL"] ?? "http://127.0.0.1:8081")!
-let socketPath = env["IMPOSSIBLE_SOCKET"] ?? "/tmp/impossible-libre2.sock"
+let socketPath = env["IMPOSSIBLE_SOCKET"] ?? "/tmp/impossible.sock"
 let unlockCount = UInt16(env["UNLOCK_COUNT"] ?? "1") ?? 1
 let wantPackets = Int(env["PACKETS"] ?? "1") ?? 1
 

@@ -67,10 +67,10 @@ Everything it does is also an HTTP call (see [Control API](#control-api); it lis
    For an older LibreTransmitter (such as `main`), apply
    [the same change as a patch](integration/LibreTransmitter/0001-Pair-with-libre2sim-in-the-iOS-Simulator.patch) with
    `git am -3`.
-2. **Start libre2sim** with `./start.sh`, and copy the environment variables it prints (`DYLD_INSERT_LIBRARIES`,
-   `IMPOSSIBLE_SOCKET`, `LIBRE2SIM_URL`) into Loop's scheme in Xcode: Product → Scheme → Edit Scheme → Run → Arguments →
-   Environment Variables. That is a local change; don't commit it.
-3. **Run Loop on an iPhone Simulator.** In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
+2. **Boot an iPhone Simulator, then start libre2sim** with `./start.sh`. It sets up the Bluetooth library inside the
+   running Simulator, so Loop needs no scheme changes, and prints what to do next. Ctrl-C stops libre2sim and removes
+   the setup again. (No Simulator running? It says so, and gives the one variable to add to the scheme instead.)
+3. **Run Loop on that Simulator** from Xcode, as usual. In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
    goes to libre2sim, the app finds the sensor over (simulated) Bluetooth, and a reading arrives each minute.
 
    <p align="center">
@@ -140,7 +140,7 @@ for records 1 to 6, it parses its receive buffer only at exactly 46 bytes, and i
 duration, which has no days: 14 days 23 hours is `359h`. `-warmup 5m` shortens the warmup of a new sensor, `-days 15` sets
 its wear time.
 
-`LIBRE2SIM_URL` (for the app) defaults to `http://127.0.0.1:8081`, and the socket to `/tmp/impossible-libre2.sock`.
+`LIBRE2SIM_URL` (for the app) defaults to `http://127.0.0.1:8081`, and the socket to `/tmp/impossible.sock`.
 ImpossiBLE's menu bar app serves that same socket, so quit it first, or give libre2sim a socket of its own. Keep socket
 paths short: macOS allows fewer than 104 bytes in a Unix socket path.
 
@@ -155,7 +155,7 @@ with g7sim's `impossible-mux`. `-simulator`, `-relaunch` and `-suspend` work as 
 | `-days` | 15 | wear time of a new sensor |
 | `-warmup` | 1h | warmup of a new sensor |
 | `-api` | `:8081` | the HTTP control and NFC API |
-| `-socket` | `/tmp/impossible-libre2.sock` | the ImpossiBLE socket |
+| `-socket` | `/tmp/impossible.sock` | the ImpossiBLE socket |
 | `-strict-unlock` | off | accept an unlock only with a count above the last one accepted |
 | `-simulator`, `-relaunch`, `-suspend`, `-dylib` | | as in libre3sim: relaunch a terminated app for its lodged connect, suspend it as iOS would |
 

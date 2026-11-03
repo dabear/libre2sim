@@ -66,7 +66,7 @@ func main() {
 	days := flag.Int("days", 15, "wear duration of a new sensor, in days")
 	warmup := flag.Duration("warmup", time.Hour, "warmup of a new sensor")
 	apiAddr := flag.String("api", ":8081", "HTTP control and NFC API address")
-	socket := flag.String("socket", "/tmp/impossible-libre2.sock", "ImpossiBLE socket the app in the Simulator connects to")
+	socket := flag.String("socket", "/tmp/impossible.sock", "ImpossiBLE socket the app in the Simulator connects to")
 	strictUnlock := flag.Bool("strict-unlock", false, "accept a BLE unlock only if its count is above the last one accepted")
 	simulator := flag.String("simulator", "", "the app's simulator (name or UDID), for -relaunch and -suspend")
 	relaunch := flag.Bool("relaunch", false, "relaunch a terminated app for its lodged connect, as iOS does")

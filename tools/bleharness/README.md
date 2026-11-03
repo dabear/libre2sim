@@ -17,7 +17,7 @@ Build: the same command as `tools/pairharness/README.md`, with `$H/main.swift` r
 `tools/bleharness/main.swift` and `-o /tmp/bleharness`. Run with:
 
 ```bash
-SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible-libre2.sock SIMCTL_CHILD_PACKETS=2 \
+SIMCTL_CHILD_IMPOSSIBLE_SOCKET=/tmp/impossible.sock SIMCTL_CHILD_PACKETS=2 \
   xcrun simctl spawn "iPhone 16" /tmp/bleharness
 ```
 
