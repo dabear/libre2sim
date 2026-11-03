@@ -27,15 +27,23 @@ prints the three environment variables the app in the Simulator needs. Later run
 `./start.sh -fresh -age 10m` starts a new one 10 minutes into its warmup, `./start.sh -fresh -age 0` one still in its
 applicator. Anything else you pass goes to libre2sim as flags (see [Flags](#flags)).
 
-![The control panel's dashboard: current and next reading, a 60-minute chart and the latest events](docs/images/panel-dashboard.png)
+<p align="center">
+  <img src="docs/images/panel-dashboard.png" width="760" alt="The control panel's dashboard">
+  <br><sub><b>Dashboard.</b> The current and next reading with a countdown, a 60-minute chart, and the latest events (here: Loop pairing over NFC, then connecting and receiving a packet each minute).</sub>
+</p>
 
 <details><summary>More of the control panel</summary>
 
-| Sensor | Event log |
-|---|---|
-| ![Glucose model, link, faults and sensor life controls](docs/images/panel-sensor.png) | ![Every NFC command, BLE connect, unlock and packet](docs/images/panel-events.png) |
-| **Settings** | **On a phone** |
-| ![Launch flags, sensor identity and the strict-unlock toggle](docs/images/panel-settings.png) | ![The dashboard at phone width](docs/images/panel-phone.png) |
+<table>
+<tr>
+<td align="center" width="50%"><img src="docs/images/panel-sensor.png" width="380" alt="The Sensor page"><br><sub><b>Sensor.</b> Glucose model, link, faults and sensor-life controls, including End warmup now.</sub></td>
+<td align="center" width="50%"><img src="docs/images/panel-events.png" width="380" alt="The Event log page"><br><sub><b>Event log.</b> Every NFC command, BLE connect, unlock and packet, filterable.</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/panel-settings.png" width="380" alt="The Settings page"><br><sub><b>Settings.</b> The strict-unlock toggle, launch flags and the sensor's identity.</sub></td>
+<td align="center"><img src="docs/images/panel-phone.png" width="180" alt="The dashboard at phone width"><br><sub><b>On a phone.</b> The sidebar becomes a drawer.</sub></td>
+</tr>
+</table>
 
 </details>
 
@@ -62,7 +70,10 @@ Everything it does is also an HTTP call (see [Control API](#control-api); it lis
 3. **Run Loop on an iPhone Simulator.** In Loop, add a CGM, choose FreeStyle Libre and its Libre 2 option, and tap Pair Sensor. The "scan"
    goes to libre2sim, the app finds the sensor over (simulated) Bluetooth, and a reading arrives each minute.
 
-   <img src="docs/images/loop-sensor.png" width="300" alt="Loop in the iOS Simulator, paired with libre2sim's sensor: operational, with its last measurement">
+   <p align="center">
+     <img src="docs/images/loop-sensor.png" width="260" alt="Loop's sensor screen in the iOS Simulator">
+     <br><sub><b>Loop in the iOS Simulator, paired with libre2sim.</b> The sensor is operational and its last measurement came over simulated Bluetooth.</sub>
+   </p>
 
 [docs/running.md](docs/running.md) has the details and a troubleshooting table; [docs/scenarios.md](docs/scenarios.md)
 has scenarios to try (out of range, low glucose, end of wear, faults, a new sensor).
