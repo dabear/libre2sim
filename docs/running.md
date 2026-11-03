@@ -23,18 +23,19 @@ GO111MODULE=on go build -o libre2sim .
 ./libre2sim -fresh -age 3h          # a sensor worn for 3 hours, ready to scan
 ```
 
-Open **http://localhost:8081/** for the control panel:
+Open **http://localhost:8081/** for the control panel. A dark sidebar (it collapses, and is a drawer on a phone) leads
+to four pages:
 
-- **Readings**: the current glucose (mg/dL and mmol/L), its sensor minute and trend, the **next reading** with a countdown to
-  when it is sent, and a 60-minute chart. The next value is exact for `fixed` and `sine`. For `walk` it's an estimate (≈),
-  because the walk's noise is drawn when the minute arrives.
-- **Sensor**: state, life count, streaming, connected, advertising, unlock count.
-- **Glucose, Link, Faults, Sensor life**: change the model, drop the link or go out of range, spoil the next packet, and
-  activate, terminate or replace the sensor.
+- **Dashboard**: the sensor minute and wear left, the phone's connection, unlocks and the glucose model; the current
+  glucose (mg/dL and mmol/L) with its trend, the **next reading** with a countdown to when it is sent, a 60-minute chart,
+  and the latest events. The next value is exact for `fixed` and `sine`. For `walk` it's an estimate (≈), because the
+  walk's noise is drawn when the minute arrives.
+- **Sensor**: change the glucose model, drop the link or go out of range, spoil the next packet, activate, terminate or
+  replace the sensor; and the full status.
 - **Event log**: every NFC command and answer (with hex and error codes), BLE connects, unlocks, packets, faults and sensor
   events. Filter it by NFC, BLE or Sensor, and pause it to read.
-- **Config**: the launch flags, the sensor's identity (UID, serial, patch info, BLE address, calibration) and a
-  strict-unlock toggle.
+- **Settings**: a strict-unlock toggle, the launch flags, and the sensor's identity (UID, serial, patch info, BLE address,
+  calibration `i1`…`i6`, and the fixed temperature every measurement carries).
 
 The same actions are available as `curl` commands; see the README's "Control API". On its own, libre2sim streams
 nothing: a phone (or the harness) must scan it over `/nfc` first, which enables Bluetooth streaming, just as on a

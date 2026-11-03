@@ -182,6 +182,14 @@ Repo: `/Users/bjorninge/Code/libre2sim` (local git only; **no remote yet**).
     simulator` resolved) differs only by `private`→`fileprivate` + a blank line; arm64 iOS `-O -wmo` objects of the pairing code
     differ in 16 bytes, **all in `__LLVM,__swift_modhash`** (source-text hash, not code). ManagerV3 can't compile here (LoopKit), but
     its device view is identical. LibreTransmitter's own unit tests were not run (need LoopKit / a full workspace).
+26. **Panel restyle (user chose "restyle libre2sim's panel"):** light UI, dark collapsible sidebar (localStorage, try/catch),
+    hash-routed pages Dashboard / Sensor / Event log / Settings, drawer under 760 px. Checked with headless Chrome screenshots
+    at 1400 px and inside a 390 px iframe (headless Chrome's minimum window width made a direct 390 px shot look clipped).
+    The open drawer was not screenshotted.
+27. **rawTemperature is not calibration (user asked):** LibreTransmitter's `CalibrationInfo` is i1…i6 (+extraOffset/Slope);
+    `rawTemperature`/`rawTemperatureAdjustment` are per-`Measurement`. The sim's `Calibration` struct keeps them (the inverse
+    needs them; saved state JSON unchanged), but `/status` and `/config` now show `calibration` = i1…i6 and a separate
+    `temperature` {raw, adjustment, celsius 31.6}. New `Sensor.Calibration()` accessor; impossible_test uses it.
 
 ## 7. Scenario verification (`docs/scenarios.md`)
 
@@ -257,4 +265,4 @@ between runs (`RECONNECT=1` reuses it). Two packets take about 1 minute (one per
 | Date | Session | What happened | Stopped at |
 |---|---|---|---|
 | 2026-11-03 | 1 | Analysed libre3sim/LibreLoop/RoundWhiteDiscKit/LibreTransmitter; wrote the plans; ran M0–M6 with subagents (M2's first attempt was stopped by the user and restarted); built the 4 harnesses; verified the full BLE path with real CoreBluetooth + ImpossiBLE + LibreTransmitter's plugin; found the LibreTransmitter fault bugs (finding 16). | The user said stop. Everything is committed. Open decisions in §8 are unanswered. |
-| 2026-11-03 | 2 | Scenarios 3, 4, 5, 7 verified with cbharness (all non-Loop scenarios now pass); found+fixed an ImpossiBLE bug (patch 0008, finding 19); shrank the LibreTransmitter patch to 3 files (finding 23); control panel v2 via Sonnet subagent, verified (finding 24); `tools/devicecheck` shows device builds unchanged (finding 25); wrote `docs/running.md`. User then asked for an 'admin panel' layout (light UI, dark collapsible sidebar); they chose restyling libre2sim's panel: pages Dashboard, Sensor, Event log, Settings (no Users/Analytics). | In progress: panel restyle in web.go. Open: §8 1, 3, 4. |
+| 2026-11-03 | 2 | Scenarios 3, 4, 5, 7 verified with cbharness (all non-Loop scenarios now pass); found+fixed an ImpossiBLE bug (patch 0008, finding 19); shrank the LibreTransmitter patch to 3 files (finding 23); control panel v2 via Sonnet subagent, verified (finding 24); `tools/devicecheck` shows device builds unchanged (finding 25); wrote `docs/running.md`. User then asked for an 'admin panel' layout (light UI, dark collapsible sidebar); they chose restyling libre2sim's panel: pages Dashboard, Sensor, Event log, Settings (no Users/Analytics). Panel restyled (finding 26); split temperature out of calibration in the API (finding 27). | Done. Open: §8 1, 3, 4. |

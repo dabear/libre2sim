@@ -244,7 +244,7 @@ func newAPI(sensor *libre2.Sensor) *api {
 func (a *api) config() map[string]interface{} {
 	st := a.sensor.Status()
 	sensor := map[string]interface{}{}
-	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration",
+	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration", "temperature",
 		"wearMinutes", "warmupMinutes", "activated", "streamingCode"} {
 		if v, ok := st[k]; ok {
 			sensor[k] = v

@@ -36,6 +36,21 @@ type Calibration struct {
 	RawTemperatureAdjustment int `json:"rawTemperatureAdjustment"`
 }
 
+// info is the calibration as LibreTransmitter's SensorData.CalibrationInfo
+// has it: i1…i6 only. The temperature fields belong to each measurement, not
+// to the calibration; they are kept in Calibration (and its saved JSON) only
+// because the inverse needs them next to i1…i6.
+func (c Calibration) info() map[string]int {
+	return map[string]int{"i1": c.I1, "i2": c.I2, "i3": c.I3, "i4": c.I4, "i5": c.I5, "i6": c.I6}
+}
+
+// measurementTemperature is the temperature every record the sim writes
+// carries: the raw fields and the °C glucoseValueFromRaw makes of them.
+func (c Calibration) measurementTemperature() map[string]interface{} {
+	return map[string]interface{}{"raw": c.RawTemperature, "adjustment": c.RawTemperatureAdjustment,
+		"celsius": math.Round(c.temperature()*10) / 10}
+}
+
 // The temperature fields of BLEExample's first record (see Calibration).
 const (
 	defaultRawTemperature           = 6336

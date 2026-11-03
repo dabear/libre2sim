@@ -149,7 +149,8 @@ func (s *Sensor) Status() map[string]interface{} {
 		"warmupMinutes":    st.WarmupMinutes,
 		"streamingEnabled": st.StreamingCode != nil,
 		"unlockCount":      st.UnlockCount,
-		"calibration":      st.Calibration,
+		"calibration":      st.Calibration.info(),
+		"temperature":      st.Calibration.measurementTemperature(),
 		"glucoseMode":      st.Glucose,
 		"connected":        s.links > 0,
 		"advertising":      s.advertising(now),
@@ -192,6 +193,14 @@ func (s *Sensor) Reading(lc int) uint16 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state.reading(lc)
+}
+
+// Calibration is the sensor's calibration with the temperature its records
+// carry: what it takes to turn a raw value into mg/dL.
+func (s *Sensor) Calibration() Calibration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Calibration
 }
 
 // StrictUnlock is whether the sensor refuses replayed unlock counts.

@@ -196,7 +196,7 @@ func TestScanConnectStream(t *testing.T) {
 		t.Fatalf("packet %+v at life count %d", d, lc)
 	}
 	if latest := d.Trend[len(d.Trend)-1]; d.Age == lc {
-		cal := status["calibration"].(libre2.Calibration)
+		cal := sensor.Calibration()
 		if g := math.Round(cal.MgdlForRaw(latest.RawGlucose)); g != float64(status["glucose"].(uint16)) {
 			t.Fatalf("packet says %v mg/dL, the sensor %v", g, status["glucose"])
 		}
