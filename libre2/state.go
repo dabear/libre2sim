@@ -13,15 +13,27 @@ import (
 )
 
 // GlucoseMode is how readings are made up: "sine" around Value, "fixed" at
-// Value, or "walk", a mean-reverting random walk around Value.
+// Value, "walk", a mean-reverting random walk around Value, or "trace", a real
+// sensor's readings played back from a FRAM dump (see Trace).
 type GlucoseMode struct {
 	Kind          string  `json:"kind"`
 	Value         float64 `json:"value"`
 	Amplitude     float64 `json:"amplitude,omitempty"`
 	PeriodMinutes float64 `json:"periodMinutes,omitempty"`
+	// Trace names the trace a "trace" mode plays. Its minute i reads
+	// State.TraceSeries[(i − TraceStartMinute) mod TraceMinutes], so it
+	// loops.
+	Trace            string `json:"trace,omitempty"`
+	TraceStartMinute int    `json:"traceStartMinute,omitempty"`
+	TraceMinutes     int    `json:"traceMinutes,omitempty"`
 }
 
-func (m GlucoseMode) String() string { return fmt.Sprintf("%s %.0f", m.Kind, m.Value) }
+func (m GlucoseMode) String() string {
+	if m.Kind == "trace" {
+		return "trace " + m.Trace
+	}
+	return fmt.Sprintf("%s %.0f", m.Kind, m.Value)
+}
 
 // Termination is a sensor that has ended early, at LifeCount: its FRAM says
 // shut down (0x05) and it refuses to enable streaming.
@@ -66,6 +78,9 @@ type State struct {
 	// shorter than Readings; those minutes use the calibration's temperature.
 	SkinRaw       []uint16  `json:"skinRaw,omitempty"`
 	TissueCelsius []float64 `json:"tissueCelsius,omitempty"`
+	// TraceSeries is the trace a "trace" glucose mode plays, kept here so a
+	// restart plays on even if its file is gone.
+	TraceSeries []uint16 `json:"traceSeries,omitempty"`
 }
 
 // TemperatureMode is the skin temperature the sensor's thermistor reads, and
@@ -236,6 +251,12 @@ func (s *State) model(i int) float64 {
 		return m.Value
 	case "walk":
 		return s.walkMean() + mrand.NormFloat64()*walkNoiseSD
+	case "trace":
+		n := len(s.TraceSeries)
+		if n == 0 {
+			return m.Value
+		}
+		return float64(s.TraceSeries[mod(i-m.TraceStartMinute, n)])
 	default:
 		period := m.PeriodMinutes
 		if period <= 0 {

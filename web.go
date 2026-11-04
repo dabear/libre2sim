@@ -20,7 +20,8 @@ const indexHTML = `<!doctype html>
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
 
 /* Sidebar */
 .side { position: fixed; inset: 0 auto 0 0; width: var(--sidew); background: var(--side); color: var(--side-fg); display: flex;
@@ -63,7 +64,7 @@ body.collapsed .main { margin-left: var(--sidew-collapsed); }
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; min-width: 0; }
 .card h2 { font-size: 13px; margin: 0 0 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .stat .label { color: var(--muted); font-size: 12.5px; }
-.stat .value { font-size: 24px; font-weight: 650; margin-top: 4px; }
+.stat .value { font-size: 24px; font-weight: 650; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stat .hint { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .big { font-size: 48px; font-weight: 700; line-height: 1.05; letter-spacing: -.01em; }
 .mid { font-size: 32px; font-weight: 650; line-height: 1.1; }
@@ -77,8 +78,10 @@ dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, SFMono-Re
 
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
 .field { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
-input[type=number], select { width: 8.5em; padding: 7px 10px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; }
-input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type=number], input[type=text], select, textarea { width: 8.5em; padding: 7px 10px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; }
+textarea { width: 100%; min-height: 4.5em; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.sub2 { font-size: 12.5px; font-weight: 600; color: var(--fg); margin: 16px 0 8px; }
+input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-weight: 500;
   box-shadow: 0 1px 2px rgba(20, 28, 45, .05); }
 .btn:hover { border-color: #cfd5e2; background: var(--soft); }
@@ -95,6 +98,8 @@ input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px 
 .pill.good { background: var(--ok-soft); color: var(--ok); } .pill.bad { background: var(--warn-soft); color: var(--warn); }
 
 svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.seg .btn { padding: 4px 10px; font-size: 12.5px; }
 .spark { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .area { fill: var(--accent-soft); stroke: none; }
 .axis { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -179,6 +184,7 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
           <div class="sub">sent in <b id="countdown">&mdash;</b></div>
           <div class="sub" id="nextNote">&nbsp;</div></div>
       </div>
+      <div class="seg" id="range" role="group" aria-label="Chart range"></div>
       <div class="chartwrap"><svg class="chart" id="chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img" aria-label="Glucose over the last 60 minutes and the next 15"></svg>
         <div class="tip" id="tip" hidden></div></div>
       <p class="note" id="chartNote">The last 60 sensor minutes and the next 15, after the line marked now. The large hollow dot is the next reading. Hover over a minute for its raw values.</p></div>
@@ -190,12 +196,19 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
 <section class="page" id="page-sensor">
   <div class="grid g2">
     <div class="card"><h2>Glucose</h2>
-      <div class="row"><label class="field">model <select id="kind"><option>sine</option><option>fixed</option><option>walk</option></select></label>
-        <label class="field">mg/dL <input id="value" type="number" value="120"></label></div>
-      <div class="row"><label class="field">amplitude <input id="amp" type="number" value="40"></label>
-        <label class="field">period (min) <input id="period" type="number" value="240"></label>
+      <div class="row"><label class="field">model <select id="kind" onchange="kindSynced = true; kindChanged()" style="width:auto;min-width:16em">
+          <option value="sine">Sine</option><option value="fixed">Fixed</option><option value="walk">Random walk</option></select></label>
+        <label class="field" id="valueField">mg/dL <input id="value" type="number" value="120"></label>
+        <label class="field" id="ampField">amplitude <input id="amp" type="number" value="40"></label>
+        <label class="field" id="periodField">period (min) <input id="period" type="number" value="240"></label>
         <button class="btn primary" onclick="setGlucose()">Set</button></div>
-      <p class="note">A new model applies from the next minute on; minutes already made up stay as they were.</p></div>
+      <p class="note" id="kindNote">A new model applies from the next minute on; minutes already made up stay as they were.</p>
+      <details style="margin-top:12px"><summary class="sub">Add your own sensor recording</summary>
+        <p class="note" style="margin-top:6px">A recording is a FRAM dump of a Libre 1 or Libre 2 (EU) sensor: 344 bytes, unencrypted, base64. Its first comment line names it (e.g. <code>// Sensor 5, recorded 2019-01-02</code>), and <code>// currentbg: 92</code> notes what the reader showed. It is saved as a local file in libre2sim's traces directory, which git ignores, and plays as about 8 hours of readings, then loops.</p>
+        <div class="row" style="margin-top:10px"><label class="field">name (letters, digits, - and _) <input id="traceName" type="text" placeholder="sensor-5" style="width:14em"></label></div>
+        <label class="field">FRAM dump (base64), or the whole file <textarea id="traceFram" spellcheck="false"></textarea></label>
+        <div class="row" style="margin-top:10px"><button class="btn" onclick="addTrace()">Add recording</button><span class="sub" id="traceMsg"></span></div>
+      </details></div>
     <div class="card"><h2>Temperature</h2>
       <div class="row"><label class="field">skin °C <input id="celsius" type="number" step="0.5" min="20" max="42" value="31.6"></label>
         <label class="field">tissue lag (min) <input id="lag" type="number" step="1" min="0" max="60" value="0"></label>
@@ -252,8 +265,6 @@ async function post(path, body) {
   } catch (e) { alert(e); }
   refresh();
 }
-function setGlucose() { post('/glucose', {kind: val('kind'), value: +val('value'), amplitude: +val('amp'), periodMinutes: +val('period')}); }
-
 // Pages and sidebar
 const titles = {dashboard: 'Dashboard', sensor: 'Sensor', events: 'Event log', settings: 'Settings'};
 function route() {
@@ -269,6 +280,96 @@ if (store('libre2sim.collapsed') === '1') document.body.classList.add('collapsed
 el('collapse').onclick = () => { const c = document.body.classList.toggle('collapsed'); store('libre2sim.collapsed', c ? '1' : '0'); };
 el('menu').onclick = () => document.body.classList.add('drawer');
 el('scrim').onclick = () => document.body.classList.remove('drawer');
+
+// The glucose model: one list of the made-up models, then each sensor
+// recording (a trace from GET /traces) as its own choice, "trace:<name>".
+function setGlucose() {
+  const k = val('kind');
+  if (k.startsWith('trace:')) post('/glucose', {kind: 'trace', trace: k.slice(6)});
+  else post('/glucose', {kind: k, value: +val('value'), amplitude: +val('amp'), periodMinutes: +val('period')});
+}
+const kindNotes = {
+  sine: 'Rises and falls around mg/dL by the amplitude, once per period.',
+  fixed: 'The same reading every minute.',
+  walk: 'Wanders randomly around mg/dL, drifting back toward it.',
+  trace: 'Plays back a real sensor\'s readings, about 8 hours, then loops. It starts at the next minute (after the warmup, if the sensor is still warming up).'
+};
+function kindChanged() {
+  const k = val('kind'), trace = k.startsWith('trace:');
+  el('valueField').hidden = trace; el('ampField').hidden = k !== 'sine'; el('periodField').hidden = k !== 'sine';
+  el('kindNote').textContent = kindNotes[trace ? 'trace' : k] + ' A new model applies from the next minute on; minutes already made up stay as they were.';
+}
+// traceLabel is "Sensor 1 (recorded 2018-04-07, 8 h)" for a trace whose file
+// starts "// Sensor 1, recorded 2018-04-07".
+function traceLabel(t) {
+  const hours = Math.round(t.minutes / 60) + ' h', i = t.label.indexOf(', ');
+  return i > 0 ? t.label.slice(0, i) + ' (' + t.label.slice(i + 2) + ', ' + hours + ')' : t.label + ' (' + hours + ')';
+}
+let kindSynced = false, traceNames = {};
+async function loadTraces(pick) {
+  let list = [];
+  try { list = await (await fetch('/traces')).json(); } catch (e) {}
+  traceNames = {};
+  for (const t of list) traceNames[t.name] = t.label;
+  const sel = el('kind'), keep = pick ? 'trace:' + pick : sel.value;
+  for (const o of Array.from(sel.options)) if (o.value.startsWith('trace:')) o.remove();
+  for (const t of list) {
+    const o = document.createElement('option'); o.value = 'trace:' + t.name; o.textContent = traceLabel(t);
+    if (t.referenceMgdl) o.title = 'The reader showed ' + t.referenceMgdl + ' mg/dL when it was recorded';
+    sel.append(o);
+  }
+  if (Array.from(sel.options).some(o => o.value === keep)) sel.value = keep;
+  kindChanged();
+}
+// syncKind shows the sensor's current model in the list, once.
+function syncKind(m) {
+  if (kindSynced || !m || !m.kind) return;
+  const v = m.kind === 'trace' ? 'trace:' + m.trace : m.kind, sel = el('kind');
+  if (!Array.from(sel.options).some(o => o.value === v)) return;
+  kindSynced = true; sel.value = v;
+  if (m.kind !== 'trace') { el('value').value = m.value; if (m.kind === 'sine') { el('amp').value = m.amplitude; el('period').value = m.periodMinutes; } }
+  kindChanged();
+}
+async function addTrace() {
+  const msg = el('traceMsg');
+  try {
+    const r = await fetch('/traces', {method: 'POST', body: JSON.stringify({name: val('traceName').trim(), fram: val('traceFram')})});
+    const j = await r.json();
+    if (!r.ok) { msg.textContent = j.error || 'HTTP ' + r.status; return; }
+    msg.textContent = 'Added ' + traceLabel(j) + ': ' + j.firstMgdl + ' to ' + j.lastMgdl + ' mg/dL. It is selected above: press Set to play it.';
+    el('traceFram').value = '';
+    loadTraces(j.name);
+  } catch (e) { msg.textContent = String(e); }
+}
+
+// The chart's ranges. Up to 8 hours it shows the coming readings too; the
+// longer ones fetch every step-th minute, at most about 1500 points.
+const ranges = {
+  '1h': {label: '1 h', minutes: 60, ahead: 15},
+  '8h': {label: '8 h', minutes: 480, ahead: 15},
+  '24h': {label: '24 h', minutes: 1440, ahead: 0},
+  wear: {label: 'Whole wear', minutes: 0, ahead: 0}
+};
+let range = ranges[store('libre2sim.range')] ? store('libre2sim.range') : '1h';
+function buildRanges() {
+  const box = el('range');
+  for (const k in ranges) {
+    const b = document.createElement('button'); b.textContent = ranges[k].label; b.dataset.k = k;
+    b.className = 'btn' + (k === range ? ' on' : '');
+    b.onclick = () => {
+      range = k; store('libre2sim.range', k); chartData = null; hideTip();
+      for (const x of box.querySelectorAll('button')) x.className = 'btn' + (x.dataset.k === k ? ' on' : '');
+      refresh();
+    };
+    box.append(b);
+  }
+}
+function readingsURL(s) {
+  const r = ranges[range];
+  const span = r.minutes || (s.lifeCount || 0) + 1;
+  const step = Math.max(1, Math.ceil(span / 1500));
+  return '/readings?minutes=' + (r.minutes || 'all') + '&step=' + step + (r.ahead ? '&ahead=' + r.ahead : '');
+}
 
 function fill(dl, obj) {
   dl.replaceChildren();
@@ -289,25 +390,32 @@ function tickCountdown() {
   el('countdown').textContent = Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 }
 
-function drawChart(h) {
+function drawChart(h, s) {
   const svg = el('chart'); svg.replaceChildren();
   const ns = 'http://www.w3.org/2000/svg';
-  const vals = h.mgdl || [], first = h.firstMinute || 0;
+  const vals = h.mgdl || [], first = h.firstMinute || 0, step = h.step || 1, latest = h.minute || 0;
+  const whole = range === 'wear';
   const pts = [];
-  vals.forEach((v, i) => { if (v > 0) pts.push([i, v]); });
-  // The coming minutes, at their place after the latest reading; warmup ones
-  // have no reading. A walk's are its mean path, with ±2 SD around it.
-  const ahead = (h.ahead || []).map(r => ({i: r.minute - first, v: r.mgdl, sd: r.estimate ? r.noiseSD : 0, warmup: r.warmup}));
+  vals.forEach((v, k) => { if (v > 0) pts.push([first + k * step, v]); });
+  // The coming minutes, after the latest reading; warmup ones have no
+  // reading. A walk's are its mean path, with ±2 SD around it.
+  const ahead = (h.ahead || []).map(r => ({m: r.minute, v: r.mgdl, sd: r.estimate ? r.noiseSD : 0, warmup: r.warmup}));
   const fut = ahead.filter(r => !r.warmup && r.v > 0);
-  if (!pts.length && !fut.length) return;
+  chartGeo = null;
+  if (!s.activated || (!pts.length && !fut.length && !whole)) return;
   const all = pts.map(p => p[1]).concat(fut.map(r => r.v - 2 * r.sd), fut.map(r => r.v + 2 * r.sd));
-  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  let lo = all.length ? Math.min.apply(null, all) : 100, hi = all.length ? Math.max.apply(null, all) : 100;
   if (hi - lo < 20) { const m = (hi + lo) / 2; lo = m - 10; hi = m + 10; }
   lo -= 5; hi += 5;
-  const end = Math.max(vals.length - 1 + 15, ahead.length ? ahead[ahead.length - 1].i : 0, h.wearEnds ? h.wearEnds - first : 0);
-  const n = Math.max(end, 1);
-  const x = i => 30 + (i / n) * 562, y = v => 162 - ((v - lo) / (hi - lo)) * 150;
-  chartGeo = {h: h, n: n, x: x, y: y, first: first, latest: vals.length - 1, ahead: ahead};
+  // The minutes shown: from the first fetched to the last coming one (or
+  // where the wear ends, if that is in the window); the whole wear for Whole wear.
+  const lastAhead = ahead.length ? ahead[ahead.length - 1].m : latest;
+  const x0 = whole ? 0 : first;
+  const x1 = whole ? Math.max(s.wearMinutes || 0, latest + 1)
+    : Math.max(latest + (ranges[range].ahead || Math.ceil(ranges[range].minutes / 60)), lastAhead, h.wearEnds || 0);
+  const n = Math.max(x1 - x0, 1);
+  const x = m => 30 + ((m - x0) / n) * 562, y = v => 162 - ((v - lo) / (hi - lo)) * 150;
+  chartGeo = {h: h, x0: x0, n: n, x: x, y: y, first: first, step: step, latest: latest, last: Math.max(lastAhead, latest), ahead: ahead};
   function add(tag, attrs, text) {
     const e = document.createElementNS(ns, tag);
     for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -319,11 +427,14 @@ function drawChart(h) {
     add('text', {x: 0, y: y(v) + 3, 'class': 'axislabel'}, String(Math.round(v)));
   });
   // Now: the latest minute plus how far the clock is into the next one.
-  const latest = vals.length - 1;
-  const into = h.next ? Math.min(Math.max(1 - h.next.inSeconds / 60, 0), 1) : 0;
+  const next = s.nextReading || h.next;
+  const into = next ? Math.min(Math.max(1 - next.inSeconds / 60, 0), 1) : 0;
   const nowX = x(latest + into);
-  if (fut.length) {
-    add('rect', {x: nowX, y: 8, width: Math.max(592 - nowX, 0), height: 158, 'class': 'future'});
+  if (fut.length || whole) add('rect', {x: nowX, y: 8, width: Math.max(592 - nowX, 0), height: 158, 'class': 'future'});
+  if (whole && s.warmupMinutes > 0) {
+    const w = x(Math.min(s.warmupMinutes, x1)) - 30;
+    add('rect', {x: 30, y: 8, width: Math.max(w, 0), height: 158, 'class': 'future'});
+    if (w > 44) add('text', {x: 34, y: 18, 'class': 'axislabel'}, 'warmup');
   }
   if (pts.length) {
     const line = pts.map(p => x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1));
@@ -331,74 +442,102 @@ function drawChart(h) {
     add('polyline', {points: line.join(' '), 'class': 'spark'});
   }
   if (fut.some(r => r.sd > 0)) {
-    const up = fut.map(r => x(r.i).toFixed(1) + ',' + y(r.v + 2 * r.sd).toFixed(1));
-    const down = fut.slice().reverse().map(r => x(r.i).toFixed(1) + ',' + y(r.v - 2 * r.sd).toFixed(1));
+    const up = fut.map(r => x(r.m).toFixed(1) + ',' + y(r.v + 2 * r.sd).toFixed(1));
+    const down = fut.slice().reverse().map(r => x(r.m).toFixed(1) + ',' + y(r.v - 2 * r.sd).toFixed(1));
     add('polygon', {points: up.concat(down).join(' '), 'class': 'band'});
   }
   const last = pts[pts.length - 1];
   if (fut.length) {
-    const path = (last && fut[0].i === last[0] + 1 ? [last] : []).concat(fut.map(r => [r.i, r.v]));
+    const path = (last && fut[0].m === last[0] + 1 ? [last] : []).concat(fut.map(r => [r.m, r.v]));
     add('polyline', {points: path.map(p => x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(' '), 'class': 'spark', 'stroke-dasharray': '4 4'});
   }
   // Marks: where the warmup ends and where the wear ends, inside the window.
   const firstReading = ahead.find(r => !r.warmup);
-  if (ahead.length && ahead[0].warmup && firstReading) mark(firstReading.i, 'first reading');
-  if (h.wearEnds) mark(h.wearEnds - first, 'wear ends');
-  function mark(i, label) {
-    add('line', {x1: x(i), x2: x(i), y1: 8, y2: 166, 'class': 'marker'});
-    add('text', {x: Math.min(x(i) + 4, 540), y: 18, 'class': 'axislabel'}, label);
+  if (ahead.length && ahead[0].warmup && firstReading) mark(firstReading.m, 'first reading');
+  if (whole) mark(x1, 'wear ends'); else if (h.wearEnds) mark(h.wearEnds, 'wear ends');
+  function mark(m, label) {
+    add('line', {x1: x(m), x2: x(m), y1: 8, y2: 166, 'class': 'marker'});
+    if (x(m) > 520) add('text', {x: x(m) - 4, y: 18, 'class': 'axislabel', 'text-anchor': 'end'}, label);
+    else add('text', {x: x(m) + 4, y: 18, 'class': 'axislabel'}, label);
   }
   add('line', {x1: nowX, x2: nowX, y1: 4, y2: 166, 'class': 'now'});
   add('text', {x: Math.min(nowX + 4, 570), y: 176, 'class': 'nowlabel'}, 'now');
-  add('text', {x: 30, y: 176, 'class': 'axislabel'}, '−' + latest + ' min');
-  if (fut.length) add('text', {x: 592, y: 176, 'class': 'axislabel', 'text-anchor': 'end'}, '+' + (n - latest) + ' min');
+  // The time axis: minutes for 1 h, hours before now for 8 h and 24 h, days
+  // of wear for the whole wear.
+  function tick(m, label, anchor) {
+    const tx = x(m);
+    if (Math.abs(tx - nowX) < 26 && anchor !== 'start') return;
+    add('text', {x: tx, y: 176, 'class': 'axislabel', 'text-anchor': anchor || 'middle'}, label);
+  }
+  if (range === '1h') {
+    tick(x0, '−' + (latest - x0) + ' min', 'start');
+    if (fut.length) tick(x1, '+' + (x1 - latest) + ' min', 'end');
+  } else if (!whole) {
+    const every = range === '8h' ? 60 : 180;
+    for (let t = every; latest - t >= x0; t += every) tick(latest - t, '−' + t / 60 + ' h');
+  } else {
+    const days = x1 / 1440, every = days > 16 ? 4 : days > 8 ? 2 : 1;
+    for (let d = 0; d * 1440 <= x1; d += every) tick(d * 1440, 'day ' + d, d === 0 ? 'start' : d * 1440 > x1 - 60 ? 'end' : 'middle');
+  }
   if (last) add('circle', {cx: x(last[0]), cy: y(last[1]), r: 4, fill: 'var(--accent)'});
-  fut.forEach((r, k) => add('circle', {cx: x(r.i), cy: y(r.v), r: k === 0 && h.next && r.i === h.next.minute - first ? 4 : 2.2,
+  fut.forEach((r, k) => add('circle', {cx: x(r.m), cy: y(r.v), r: k === 0 && next && r.m === next.minute ? 4 : 2.2,
     fill: 'var(--card)', stroke: 'var(--accent)', 'stroke-width': k === 0 ? 2 : 1.4, 'vector-effect': 'non-scaling-stroke'}));
-  if (hoverMinute !== null) showTip(hoverMinute - first);
+  if (hoverMinute !== null) showTip(snap(hoverMinute));
 }
 
-// Hover: the minute under the pointer, with its reading and the raw values
-// the BLE packet carries for it.
+// Hover: the minute under the pointer, with its reading and, when every
+// minute is fetched, the raw values the BLE packet carries for it.
 let chartGeo = null, hoverMinute = null;
+// snap is the shown minute nearest m: a fetched one, or a coming one.
+function snap(m) {
+  const g = chartGeo;
+  if (!g) return m;
+  m = Math.max(g.first, Math.min(g.last, m));
+  if (m <= g.latest) return g.first + Math.round((m - g.first) / g.step) * g.step;
+  return Math.round(m);
+}
 function hoverAt(ev) {
   if (!chartGeo) return;
   const svg = el('chart'), r = svg.getBoundingClientRect();
   const vx = (ev.clientX - r.left) / r.width * 600;
-  const g = chartGeo, last = g.ahead.length ? g.ahead[g.ahead.length - 1].i : g.latest;
-  const i = Math.max(0, Math.min(last, Math.round((vx - 30) / 562 * g.n)));
-  hoverMinute = g.first + i;
-  showTip(i);
+  hoverMinute = snap(chartGeo.x0 + (vx - 30) / 562 * chartGeo.n);
+  showTip(hoverMinute);
 }
 function hideTip() {
   hoverMinute = null; el('tip').hidden = true;
   const old = el('chart').querySelector('.hover'); if (old) old.remove();
 }
-function showTip(i) {
-  const g = chartGeo, h = g.h, tip = el('tip'), svg = el('chart');
+function showTip(minute) {
+  const g = chartGeo, tip = el('tip'), svg = el('chart');
+  if (!g) { hideTip(); return; }
+  const h = g.h;
   let v, rec, ahead = null;
-  if (i <= g.latest) { v = h.mgdl[i]; rec = (h.records || [])[i]; }
-  else {
-    const k = g.ahead.findIndex(a => a.i === i);
+  if (minute <= g.latest) {
+    const k = (minute - g.first) / g.step;
+    if (k < 0 || k !== Math.floor(k) || k >= (h.mgdl || []).length) { hideTip(); return; }
+    v = h.mgdl[k]; rec = (h.records || [])[k];
+  } else {
+    const k = g.ahead.findIndex(a => a.m === minute);
     if (k < 0) { hideTip(); return; }
     ahead = h.ahead[k]; v = ahead.mgdl; rec = (h.aheadRecords || [])[k];
   }
+  hoverMinute = minute;
   // The guide line and dot.
   const old = svg.querySelector('.hover'); if (old) old.remove();
   const ns = 'http://www.w3.org/2000/svg', grp = document.createElementNS(ns, 'g');
   grp.setAttribute('class', 'hover');
   const ln = document.createElementNS(ns, 'line');
-  [['x1', g.x(i)], ['x2', g.x(i)], ['y1', 8], ['y2', 166], ['class', 'hoverline']].forEach(a => ln.setAttribute(a[0], a[1]));
+  [['x1', g.x(minute)], ['x2', g.x(minute)], ['y1', 8], ['y2', 166], ['class', 'hoverline']].forEach(a => ln.setAttribute(a[0], a[1]));
   grp.append(ln);
   if (v > 0) {
     const c = document.createElementNS(ns, 'circle');
-    [['cx', g.x(i)], ['cy', g.y(v)], ['r', 5], ['fill', 'none'], ['stroke', 'var(--fg)'], ['stroke-width', 1.5], ['vector-effect', 'non-scaling-stroke']].forEach(a => c.setAttribute(a[0], a[1]));
+    [['cx', g.x(minute)], ['cy', g.y(v)], ['r', 5], ['fill', 'none'], ['stroke', 'var(--fg)'], ['stroke-width', 1.5], ['vector-effect', 'non-scaling-stroke']].forEach(a => c.setAttribute(a[0], a[1]));
     grp.append(c);
   }
   svg.append(grp);
 
-  const minute = g.first + i;
-  const at = h.activatedMs ? new Date(h.activatedMs + minute * 60000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+  const t = h.activatedMs ? new Date(h.activatedMs + minute * 60000) : null;
+  const at = t ? (g.n > 1440 ? t.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' ' : '') + t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
   tip.replaceChildren();
   function add(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; tip.append(e); return e; }
   function row(k, val, why) {
@@ -406,7 +545,7 @@ function showTip(i) {
     const b = document.createElement('code'); b.textContent = val; r.append(a, b);
     if (why) add('div', 'why', why);
   }
-  add('h4', '', 'Minute ' + minute + (at ? ' · ' + at : '') + (ahead ? ' · coming' : (i === g.latest ? ' · latest' : '')));
+  add('h4', '', 'Minute ' + minute + (at ? ' · ' + at : '') + (ahead ? ' · coming' : (minute === g.latest ? ' · latest' : '')));
   if (!(v > 0)) {
     add('div', 'big', 'No reading');
     add('div', 'why', 'Still in warmup: the record\'s raw glucose is 0, and the app skips records like that.');
@@ -416,6 +555,7 @@ function showTip(i) {
     if (ahead) add('div', 'why', ahead.estimate
       ? 'An estimate: the walk model adds random noise when the minute arrives; about 95% of readings fall within ±' + (2 * ahead.noiseSD).toFixed(1) + ' mg/dL of this. The raw values below are for this estimate.'
       : 'Exact: sent at ' + new Date(ahead.atMs).toLocaleTimeString() + '. The model is deterministic, so this is what the sensor will send.');
+    else if (g.step > 1) add('div', 'why', 'One reading every ' + g.step + ' minutes at this range. Choose 1 h or 8 h for each minute\'s raw values.');
     else add('div', 'why', 'The value libre2sim made up for this minute (the parsed reading).');
     if (rec) {
       const c = h.calibration || {};
@@ -431,7 +571,7 @@ function showTip(i) {
   }
   tip.hidden = false;
   // Beside the pointer's minute, on whichever side has room.
-  const wrapW = svg.parentElement.clientWidth, px = g.x(i) / 600 * svg.clientWidth, w = tip.offsetWidth;
+  const wrapW = svg.parentElement.clientWidth, px = g.x(minute) / 600 * svg.clientWidth, w = tip.offsetWidth;
   tip.style.left = (px + 14 + w <= wrapW ? px + 14 : Math.max(0, px - 14 - w)) + 'px';
 }
 
@@ -466,10 +606,18 @@ function showReadings(s, h) {
   }
   tickCountdown();
   if (h) {
-    drawChart(h);
-    const est = (h.ahead || []).some(r => r.estimate);
-    el('chartNote').textContent = 'The last 60 sensor minutes and the next 15, after the line marked now. The large hollow dot is the next reading. Hover over (or tap) a minute for its raw values. ' +
-      (est ? 'The coming readings are the walk model\'s expected path; the shaded band is where about 95% of its random readings will fall.' : 'The coming readings are exact: the model is deterministic.');
+    drawChart(h, s);
+    const est = (h.ahead || []).some(r => r.estimate), step = h.step || 1;
+    const hover = step > 1 ? 'One point every ' + step + ' minutes; hover over (or tap) one for its reading.' : 'Hover over (or tap) a minute for its raw values.';
+    const coming = est ? 'The coming readings are the walk model\'s expected path; the shaded band is where about 95% of its random readings will fall.' : 'The coming readings are exact: the model is deterministic.';
+    const what = {
+      '1h': 'The last 60 sensor minutes and the next 15, after the line marked now. The large hollow dot is the next reading. ' + hover + ' ' + coming,
+      '8h': 'The last 8 hours and the next 15 minutes, after the line marked now. ' + hover + ' ' + coming,
+      '24h': 'The last 24 hours, up to the line marked now. ' + hover,
+      wear: 'The whole wear: the warmup at the left, the readings so far, the line marked now, and the wear still to come up to where it ends. ' + hover
+    }[range];
+    el('chartNote').textContent = what;
+    el('chart').setAttribute('aria-label', 'Glucose: ' + ranges[range].label.toLowerCase());
   }
 }
 
@@ -510,8 +658,14 @@ function showStatus(s) {
   el('statUnlocks').textContent = s.unlocksAccepted !== undefined ? s.unlocksAccepted : '—';
   el('statUnlockHint').textContent = (s.unlocksRefused ? s.unlocksRefused + ' refused · ' : '') + 'count ' + (s.unlockCount !== undefined ? s.unlockCount : '—');
   const m = s.glucoseMode || {};
-  el('statModel').textContent = m.kind ? m.kind[0].toUpperCase() + m.kind.slice(1) : '—';
-  el('statModelHint').textContent = m.kind === 'sine' ? m.value + ' ± ' + m.amplitude + ' mg/dL, ' + m.periodMinutes + ' min' : m.kind ? 'around ' + m.value + ' mg/dL' : ' ';
+  syncKind(m);
+  // A recording shows its label's name part ("Sensor 1"), the rest below.
+  const label = m.kind === 'trace' ? traceNames[m.trace] || m.trace : '', cut = label.indexOf(', ');
+  el('statModel').textContent = m.kind === 'trace' ? (cut > 0 ? label.slice(0, cut) : label)
+    : m.kind === 'walk' ? 'Random walk' : m.kind ? m.kind[0].toUpperCase() + m.kind.slice(1) : '—';
+  el('statModel').title = label;
+  el('statModelHint').textContent = m.kind === 'trace' ? (cut > 0 ? label.slice(cut + 2) + ' · ' : 'recording · ') + duration(m.traceMinutes || 0) + ', looping'
+    : m.kind === 'sine' ? m.value + ' ± ' + m.amplitude + ' mg/dL, ' + m.periodMinutes + ' min' : m.kind ? 'around ' + m.value + ' mg/dL' : ' ';
 }
 
 let events = [], lastSeq = 0, filter = 'all', paused = false;
@@ -565,10 +719,18 @@ async function loadConfig() {
   } catch (e) {}
 }
 
+// chartData is the readings the chart shows. 1 h is fetched on every
+// refresh; the longer ranges when the sensor minute changes, or every 10 s.
+let chartData = null;
 async function refresh() {
   try {
-    const [s, h] = await Promise.all([fetch('/status').then(r => r.json()), fetch('/readings?minutes=60&ahead=15').then(r => r.json())]);
-    showReadings(s, h); showStatus(s);
+    const s = await fetch('/status').then(r => r.json());
+    const want = range, c = chartData;
+    if (!c || c.range !== want || want === '1h' || c.h.minute !== s.lifeCount || Date.now() - c.at > 10000) {
+      const h = await fetch(readingsURL(s)).then(r => r.json());
+      if (want === range) chartData = {range: want, h: h, at: Date.now()};
+    }
+    showReadings(s, chartData && chartData.range === range ? chartData.h : null); showStatus(s);
     await pollEvents();
   } catch (e) {}
 }
@@ -576,6 +738,6 @@ el('chart').addEventListener('pointermove', hoverAt);
 el('chart').addEventListener('pointerdown', hoverAt);
 el('chart').addEventListener('pointerleave', ev => { if (ev.pointerType !== 'touch') hideTip(); });
 document.addEventListener('pointerdown', ev => { if (hoverMinute !== null && !el('chart').contains(ev.target)) hideTip(); });
-route(); buildFilters(); loadConfig(); refresh();
+route(); buildFilters(); buildRanges(); loadTraces(); loadConfig(); refresh();
 setInterval(refresh, 1500); setInterval(tickCountdown, 250);
 </script></body></html>`

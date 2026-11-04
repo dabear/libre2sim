@@ -152,8 +152,32 @@ func (s *Sensor) SetGlucoseMode(m GlucoseMode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state.Glucose = m
+	s.state.TraceSeries = nil
 	s.changed()
 	s.events.Add(CatSensor, "glucose-mode", "glucose mode now %s (amplitude %g, period %g min)", m, m.Amplitude, m.PeriodMinutes)
+}
+
+// SetGlucoseTrace plays trace (named name) from the next minute on, looping,
+// or from the first reading if the sensor is still in warmup or in its
+// applicator, so the trace starts at its beginning.
+func (s *Sensor) SetGlucoseTrace(name string, trace *Trace, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.state
+	lc := 0
+	if st.Activated != nil {
+		lc = st.lifeCount(now)
+		st.fill(lc)
+	}
+	start := lc + 1
+	if start < st.WarmupMinutes {
+		start = st.WarmupMinutes
+	}
+	st.Glucose = GlucoseMode{Kind: "trace", Trace: name, TraceStartMinute: start, TraceMinutes: len(trace.Series)}
+	st.TraceSeries = append([]uint16(nil), trace.Series...)
+	s.changed()
+	s.events.Add(CatSensor, "glucose-mode", "glucose mode now trace %s: %d minutes of a real sensor's readings, looping, from minute %d",
+		name, len(trace.Series), start)
 }
 
 // SetTemperature sets the skin temperature, and the tissue's lag behind it,

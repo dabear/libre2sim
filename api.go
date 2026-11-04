@@ -27,7 +27,14 @@ import (
 //	GET  /readings?minutes=60&ahead=15
 //	                             the latest readings (mg/dL by minute, oldest
 //	                             first) with the next reading and the trend, and
-//	                             the next `ahead` readings (0 to 60; none by default)
+//	                             the next `ahead` readings (0 to 60; none by default);
+//	                             minutes=all is the whole wear so far, and step=N
+//	                             every Nth minute only (without the BLE records)
+//	GET  /traces                 the traces the "trace" glucose model can play:
+//	                             [{name,minutes,referenceMgdl,firstMgdl,lastMgdl}]
+//	POST /traces      {"name":"my-sensor","fram":"<base64, or a whole trace file>"}
+//	                             add (or replace) a trace: an unencrypted Libre 1/2
+//	                             FRAM dump; 400 if it is not one
 //	GET  /events?since=<seq>     the event log, oldest first: {"last":seq,
 //	                             "events":[{seq,time,cat,kind,msg}]}
 //	GET  /config                 the launch configuration and the sensor's identity
@@ -36,8 +43,9 @@ import (
 //	POST /glucose     {"kind":"fixed","value":65}
 //	                  {"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}
 //	                  {"kind":"walk","value":140}
+//	                  {"kind":"trace","trace":"my-sensor"}
 //	                             how readings are made up from the next minute on;
-//	                             400 on any other kind
+//	                             400 on any other kind, or a trace there is not
 //	POST /temperature {"celsius":28,"tissueLagMinutes":5}
 //	                             the skin temperature the thermistor reads from the
 //	                             next minute on (20…42 °C), and how many minutes the
@@ -80,6 +88,8 @@ type api struct {
 	replace func(sensorConfig)
 	// launch is how libre2sim was started, for GET /config.
 	launch launchConfig
+	// traces is where the "trace" glucose model's traces are.
+	traces traceStore
 	mux    *http.ServeMux
 }
 
@@ -99,10 +109,11 @@ type launchConfig struct {
 	Relaunch      bool    `json:"relaunch"`
 	Suspend       bool    `json:"suspend"`
 	Dylib         string  `json:"dylib"`
+	Traces        string  `json:"traces"`
 }
 
 func newAPI(sensor *libre2.Sensor) *api {
-	a := &api{sensor: sensor, mux: http.NewServeMux()}
+	a := &api{sensor: sensor, mux: http.NewServeMux(), traces: traceStore{dir: "traces"}}
 	a.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -115,12 +126,17 @@ func newAPI(sensor *libre2.Sensor) *api {
 		writeJSON(w, sensor.Status())
 	})
 	a.mux.HandleFunc("/readings", func(w http.ResponseWriter, r *http.Request) {
-		minutes, err := strconv.Atoi(r.URL.Query().Get("minutes"))
+		q := r.URL.Query()
+		minutes, err := strconv.Atoi(q.Get("minutes"))
 		if err != nil || minutes < 1 {
 			minutes = 60
 		}
-		if minutes > 1440 {
-			minutes = 1440
+		if minutes > maxReadingsMinutes || q.Get("minutes") == "all" {
+			minutes = maxReadingsMinutes
+		}
+		step, _ := strconv.Atoi(q.Get("step"))
+		if step < 1 {
+			step = 1
 		}
 		ahead, _ := strconv.Atoi(r.URL.Query().Get("ahead"))
 		if ahead < 0 {
@@ -129,7 +145,7 @@ func newAPI(sensor *libre2.Sensor) *api {
 		if ahead > 60 {
 			ahead = 60
 		}
-		writeJSON(w, sensor.History(minutes, ahead, time.Now()))
+		writeJSON(w, sensor.HistoryEvery(minutes, step, ahead, time.Now()))
 	})
 	a.mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
@@ -156,10 +172,51 @@ func newAPI(sensor *libre2.Sensor) *api {
 		}
 		writeJSON(w, a.config())
 	})
+	a.mux.HandleFunc("/traces", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			list, err := a.traces.list()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error(), 0)
+				return
+			}
+			writeJSON(w, list)
+		case http.MethodPost:
+			var req struct {
+				Name string `json:"name"`
+				FRAM string `json:"fram"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, `want {"name":"my-sensor","fram":"<base64 FRAM dump>"}`, 0)
+				return
+			}
+			e, err := a.traces.add(req.Name, req.FRAM)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error(), 0)
+				return
+			}
+			log.Printf("trace %s added: %d minutes", e.Name, e.Minutes)
+			sensor.Events().Add(libre2.CatSensor, "trace-added", "trace %s added: %d minutes, %d to %d mg/dL", e.Name, e.Minutes, e.FirstMgdl, e.LastMgdl)
+			writeJSON(w, e)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "GET or POST /traces", 0)
+		}
+	})
 	a.post("/glucose", func(w http.ResponseWriter, r *http.Request) {
 		var m libre2.GlucoseMode
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || (m.Kind != "fixed" && m.Kind != "sine" && m.Kind != "walk") {
-			writeError(w, http.StatusBadRequest, `bad glucose mode; want kind "fixed", "sine" or "walk"`, 0)
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || (m.Kind != "fixed" && m.Kind != "sine" && m.Kind != "walk" && m.Kind != "trace") {
+			writeError(w, http.StatusBadRequest, `bad glucose mode; want kind "fixed", "sine", "walk" or "trace"`, 0)
+			return
+		}
+		if m.Kind == "trace" {
+			t, err := a.traces.load(m.Trace)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error()+"; GET /traces lists them", 0)
+				return
+			}
+			sensor.SetGlucoseTrace(m.Trace, t, time.Now())
+			log.Printf("glucose mode now trace %s (%d minutes)", m.Trace, len(t.Series))
+			writeJSON(w, sensor.Status())
 			return
 		}
 		sensor.SetGlucoseMode(m)
@@ -274,6 +331,10 @@ func newAPI(sensor *libre2.Sensor) *api {
 	a.post("/nfc", a.nfc)
 	return a
 }
+
+// maxReadingsMinutes is the most minutes GET /readings returns: more than
+// any wear (its minutes are 16 bits in the FRAM).
+const maxReadingsMinutes = 1 << 16
 
 // config is GET /config: {"launch":{…},"sensor":{…}}.
 func (a *api) config() map[string]interface{} {

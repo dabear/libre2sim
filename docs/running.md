@@ -31,12 +31,15 @@ to four pages:
   latest events. The next value is exact for `fixed` and `sine`. For `walk` it's an estimate (≈), because the walk's
   noise is drawn when the minute arrives.
 
-  The chart shows the last 60 minutes, a line marking **now**, and the **next 15 readings** as a dashed line. For `walk`
+  The chart shows the last 60 minutes, a line marking **now**, and the **next 15 readings** as a dashed line. Above it
+  you can widen it to 8 hours, 24 hours or the **whole wear** (the warmup at the left, the wear still to come at the
+  right, up to "wear ends"); the panel remembers your choice. The longer ranges fetch one reading every few minutes, so
+  hovering there shows the reading only, not the raw values. For `walk`
   the coming readings are the expected path, with a band where about 95% of the random readings will fall. Markers
   show where a warmup ends ("first reading") or the wear ends within that window. **Hover over (or tap) a minute** for
   its reading and the raw values its BLE record carries: the raw glucose, what LibreTransmitter computes from it, the
   raw temperature fields, and the 4-byte record, each with a short explanation.
-- **Sensor**: change the glucose model or the skin temperature (and how far the tissue lags it), drop the link or go out
+- **Sensor**: change the glucose model (sine, fixed, random walk, or one of your sensor recordings) or the skin temperature (and how far the tissue lags it), drop the link or go out
   of range, spoil the next packet, activate, terminate or replace the sensor; and the full status.
 - **Event log**: every NFC command and answer (with hex and error codes), BLE connects, unlocks, packets, faults and sensor
   events. Filter it by NFC, BLE or Sensor, and pause it to read.
@@ -51,6 +54,21 @@ Useful flags: `-age 0` (the default) leaves the sensor in its applicator (scan i
 the warmup of a new sensor (60 minutes by default; "End warmup now" on the Sensor page or `POST /end-warmup` cuts a running
 one short); `-age 359h58m` gives a sensor 2 minutes before the end of its 15 days; `-strict-unlock` refuses a replayed unlock
 count. `-state` is where the sensor is saved; without `-fresh` libre2sim resumes it.
+
+### Sensor recordings (traces)
+
+Besides the made-up models, libre2sim can play back a real sensor's readings: a **trace**, made from one FRAM dump
+of a Libre 1 or Libre 2 (EU) sensor (344 bytes, unencrypted, base64-encoded). libre2sim decodes the dump's 8 hours of
+history and its last 15 minutes with LibreTransmitter's own algorithm and the sensor's own calibration, fills in the
+minutes between the 15-minute history points smoothly, and plays the result from the next minute on, looping.
+
+Traces are local files: `traces/<name>.txt` beside the binary (or `-traces DIR`). git ignores that directory, so
+recordings never end up in the repository. Lines starting with `//` are comments: the first one names the recording
+in the panel (`// Sensor 1, recorded 2018-04-07`), and `// currentbg: 92` notes what the reader showed.
+
+The Sensor page's model list shows every trace in the directory as its own choice. To add your own, open **Add your
+own sensor recording** below it, or `POST /traces` (see the README's "Control API"). A dump with the wrong size or a
+failing CRC (an encrypted Libre 2 dump, for example) is refused with the reason.
 
 ## 2. With LibreTransmitter's real code, without Loop
 

@@ -108,6 +108,7 @@ are in [tools/cbharness/README.md](tools/cbharness/README.md). The other tools a
 | Unlock check: the 12-byte write to F001 is verified against the code the NFC enable-streaming set; `-strict-unlock` also refuses a replayed count | done, unit tested |
 | Streaming: a 46-byte packet each minute, notified as 20 + 20 + 6 bytes | done, unit tested; decoded through LibreTransmitter's `Libre2DirectTransmitter` |
 | Glucose: the exact inverse of LibreTransmitter's `GlucoseFromRaw` algorithm, so the app computes the value libre2sim modelled (`sine`, `fixed`, `walk`) | done; 40 to 400 mg/dL checked one by one, and against the real client |
+| Sensor recordings: play back a real Libre 1 or Libre 2 (EU) FRAM dump's 8 hours (`trace`), from local files git ignores | done, unit tested |
 | Warmup, end of wear, early termination | done |
 | Outages (`/disconnect`, `/out-of-range`) | done |
 | Faults for the next packet: bad checksum, short packet | done, unit tested |
@@ -159,6 +160,7 @@ with g7sim's `impossible-mux`. `-simulator`, `-relaunch` and `-suspend` work as 
 | `-socket` | `/tmp/impossible.sock` | the ImpossiBLE socket |
 | `-strict-unlock` | off | accept an unlock only with a count above the last one accepted |
 | `-simulator`, `-relaunch`, `-suspend`, `-dylib` | | as in libre3sim: relaunch a terminated app for its lodged connect, suspend it as iOS would |
+| `-traces` | `traces/` beside the binary | the sensor recordings (FRAM dumps) the `trace` glucose model plays; see [docs/running.md](docs/running.md#sensor-recordings-traces) |
 
 ## Control API
 
@@ -181,12 +183,14 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | Endpoint | What it does |
 |---|---|
 | `GET /` | the control panel |
-| `GET /readings` | `?minutes=60` (1 to 1440) `&ahead=15` (0 to 60): `{"minute","firstMinute","mgdl":[…],"records":[…],"next":{…},"trend":{…},"ahead":[…],"aheadRecords":[…],"wearEnds","calibration","temperature"}`. The latest readings oldest first (0 is no reading, in warmup), each one's BLE record (`raw`, `appMgdl` the app computes from it, `ble` hex), and the next `ahead` readings (`estimate` and `noiseSD` for the walk model; `wearEnds` if the wear ends first) |
+| `GET /readings` | `?minutes=60` (or `all`, the whole wear so far) `&step=1` (every Nth minute; above 1 there are no `records` or `aheadRecords`, to keep it small) `&ahead=15` (0 to 60): `{"minute","firstMinute","mgdl":[…],"records":[…],"next":{…},"trend":{…},"ahead":[…],"aheadRecords":[…],"wearEnds","calibration","temperature"}`. The latest readings oldest first (0 is no reading, in warmup), each one's BLE record (`raw`, `appMgdl` the app computes from it, `ble` hex), and the next `ahead` readings (`estimate` and `noiseSD` for the walk model; `wearEnds` if the wear ends first) |
 | `GET /events` | `?since=<seq>`: `{"last":seq,"events":[{"seq","time","cat","kind","msg"}]}`, oldest first. `cat` is `nfc`, `ble` or `sensor`. The latest 200 events are kept in memory, so a restart (`/new`) empties them |
 | `GET /config` | `{"launch":{version, statePath, api, socket, fresh, days, warmupMinutes, ageMinutes, simulator, relaunch, suspend, dylib},"strictUnlock":bool,"sensor":{uid, serial, patchInfo, bleAddress, advertisedName, calibration (i1…i6), temperature, …}}` |
 | `POST /config` | `{"strictUnlock":true}`: toggle strict unlock at run time (the only setting that is safe to change live); answers like `GET /config`. 400 on anything else |
 | `GET /status` | UID, serial, patch info, BLE address and advertised name, `calibration` (`i1`…`i6`, as LibreTransmitter's `CalibrationInfo`), `temperature` (`raw`, `adjustment`, `celsius`: the fixed values every measurement record carries; per measurement in LibreTransmitter, not calibration), FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed. Also `strictUnlock`, `unlocksAccepted`/`unlocksRefused` (since launch), `nextReading` (`{minute, mgdl, warmup, estimate, noiseSD, at, atMs, inSeconds}`) and `trend` (`delta1`, `delta5`, `delta15`: mg/dL against that many minutes earlier) |
-| `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`; applies from the next minute. 400 on another kind |
+| `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`, or `{"kind":"trace","trace":"<name>"}` to play a sensor recording (looping; it starts after the warmup if the sensor is still warming up); applies from the next minute. 400 on another kind or an unknown trace |
+| `GET /traces` | the sensor recordings in the traces directory: `[{"name","label","minutes","referenceMgdl","firstMgdl","lastMgdl"}]`. `label` is the file's first `//` comment line (else its name); `referenceMgdl` is its `// currentbg:` line, if any |
+| `POST /traces` | `{"name":"my-sensor","fram":"<base64>"}`: add (or replace) a recording, an unencrypted Libre 1 or Libre 2 (EU) FRAM dump of 344 bytes, base64, or a whole trace file with its `//` comments. Saved as `<name>.txt` (letters, digits, `-` and `_`). 400 with the reason if the dump is the wrong size or its body CRC fails |
 | `POST /temperature` | `{"celsius":28,"tissueLagMinutes":5}`: the skin temperature the thermistor reads (20–42 °C) from the next minute on, and how many minutes the tissue, which the raw glucose follows, lags it (0–60). LibreTransmitter corrects with the skin temperature, so with a lag its reading is off for a while after a change. 400 out of range |
 | `POST /activate` | start a sensor still in its applicator (the Abbott app's job on a real one; LibreTransmitter cannot). 409 if already started |
 | `POST /end-warmup` | end the warmup early: the next minute is the first with a reading (the panel's "End warmup now"). 409 unless the sensor is in warmup |

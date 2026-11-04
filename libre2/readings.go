@@ -120,6 +120,9 @@ type History struct {
 	Minute int `json:"minute"` // the latest life count
 	// FirstMinute is the life count of Values[0].
 	FirstMinute int `json:"firstMinute"`
+	// Step is the minutes between Values: 1 is every minute; more than 1 is
+	// every Step-th minute, ending at Minute, without Records.
+	Step int `json:"step"`
 	// Values holds mg/dL by minute, oldest first; 0 is no reading (warmup).
 	Values []uint16     `json:"mgdl"`
 	Next   *NextReading `json:"next,omitempty"`
@@ -130,8 +133,9 @@ type History struct {
 	WearEnds int           `json:"wearEnds,omitempty"`
 	// Records is how each of Values goes over BLE, index for index; Ahead's
 	// are in AheadRecords. Calibration and Temperature are what the app needs
-	// besides a record's raw glucose to compute glucose from it.
-	Records      []RecordDetail         `json:"records"`
+	// besides a record's raw glucose to compute glucose from it. Both are left
+	// out when Step is over 1.
+	Records      []RecordDetail         `json:"records,omitempty"`
 	AheadRecords []RecordDetail         `json:"aheadRecords,omitempty"`
 	Calibration  map[string]int         `json:"calibration,omitempty"`
 	Temperature  map[string]interface{} `json:"temperature,omitempty"`
@@ -175,10 +179,20 @@ func recordDetail(c Calibration, mgdl uint16, rawT int, tissue float64) RecordDe
 
 // History returns up to the last minutes readings, and the next ahead ones.
 func (s *Sensor) History(minutes, ahead int, now time.Time) History {
+	return s.HistoryEvery(minutes, 1, ahead, now)
+}
+
+// HistoryEvery is History with only every step-th minute of the last minutes
+// (the latest among them), and no records when step is over 1: the whole wear
+// in a small answer.
+func (s *Sensor) HistoryEvery(minutes, step, ahead int, now time.Time) History {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	h := History{Values: []uint16{}, Records: []RecordDetail{}}
+	if step < 1 {
+		step = 1
+	}
+	h := History{Step: step, Values: []uint16{}}
 	if st.Activated == nil {
 		return h
 	}
@@ -190,10 +204,14 @@ func (s *Sensor) History(minutes, ahead int, now time.Time) History {
 	if minutes < 1 || first < 0 {
 		first = 0
 	}
+	first = lc - (lc-first)/step*step
 	h.Minute, h.FirstMinute = lc, first
-	for i := first; i <= lc; i++ {
+	for i := first; i <= lc; i += step {
 		v := st.reading(i)
 		h.Values = append(h.Values, v)
+		if step > 1 {
+			continue
+		}
 		_, rawT, _ := st.record(i)
 		tissue := st.Calibration.temperature()
 		if i < len(st.TissueCelsius) {
@@ -204,6 +222,9 @@ func (s *Sensor) History(minutes, ahead int, now time.Time) History {
 	h.Next, h.Trend = s.nextReading(now), s.trend(now)
 	if ahead > 0 {
 		h.Ahead, h.WearEnds = s.upcoming(now, ahead)
+		if step > 1 {
+			return h
+		}
 		// The coming minutes at the current temperature setting, the tissue
 		// still approaching it.
 		c := st.Calibration

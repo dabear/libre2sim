@@ -72,11 +72,15 @@ func main() {
 	relaunch := flag.Bool("relaunch", false, "relaunch a terminated app for its lodged connect, as iOS does")
 	suspendApp := flag.Bool("suspend", false, "stop the app while iOS would have it suspended, waking it for Bluetooth events")
 	dylib := flag.String("dylib", "", "ImpossiBLE library injected into a relaunched app (default: simulator/build/libImpossiBLE.dylib beside libre2sim)")
+	traces := flag.String("traces", "", "directory of FRAM-dump traces for the \"trace\" glucose model (default: traces/ beside libre2sim)")
 	flag.Parse()
 	if (*relaunch || *suspendApp) && *simulator == "" {
 		log.Fatalf("-relaunch and -suspend need -simulator")
 	}
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
+	if *traces == "" {
+		*traces = defaultTracesDir()
+	}
 
 	var state *libre2.State
 	if !*fresh {
@@ -147,14 +151,15 @@ func main() {
 		args := []string{exe, "-state", *statePath, "-api", *apiAddr, "-socket", *socket,
 			"-strict-unlock=" + strconv.FormatBool(sensor.StrictUnlock()), "-simulator", *simulator,
 			"-relaunch=" + strconv.FormatBool(*relaunch), "-suspend=" + strconv.FormatBool(*suspendApp),
-			"-dylib", *dylib}
+			"-dylib", *dylib, "-traces", *traces}
 		log.Fatalf("restarting: %v", syscall.Exec(exe, args, os.Environ()))
 	}
 
 	a := newAPI(sensor)
 	a.launch = launchConfig{Version: version(), StatePath: *statePath, API: *apiAddr, Socket: *socket, Fresh: *fresh,
 		Days: *days, WarmupMinutes: warmup.Minutes(), AgeMinutes: age.Minutes(), Simulator: *simulator,
-		Relaunch: *relaunch, Suspend: *suspendApp, Dylib: *dylib}
+		Relaunch: *relaunch, Suspend: *suspendApp, Dylib: *dylib, Traces: *traces}
+	a.traces = traceStore{dir: *traces}
 	a.radio = radio
 	a.replace = replace
 	go func() {
