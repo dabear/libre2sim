@@ -60,7 +60,11 @@ count. `-state` is where the sensor is saved; without `-fresh` libre2sim resumes
 Besides the made-up models, libre2sim can play back a real sensor's readings: a **trace**, made from one FRAM dump
 of a Libre 1 or Libre 2 (EU) sensor (344 bytes, unencrypted, base64-encoded). libre2sim decodes the dump's 8 hours of
 history and its last 15 minutes with LibreTransmitter's own algorithm and the sensor's own calibration, fills in the
-minutes between the 15-minute history points smoothly, and plays the result from the next minute on, looping.
+minutes between the 15-minute history points smoothly, and plays the result in a loop. On a running sensor, choosing
+a recording also replaces the readings made so far, lined up so the recording ends at the current minute: the chart
+shows it at once, as it was recorded. From the next minute it loops, with a 15-minute bridge from its last reading back
+to its first. (On a sensor still in warmup it starts at the first reading.) An app that already read the old minutes
+keeps them; a new scan or backfill gets the recording.
 
 Traces are local files: `traces/<name>.txt` beside the binary (or `-traces DIR`). git ignores that directory, so
 recordings never end up in the repository. Lines starting with `//` are comments: the first one names the recording

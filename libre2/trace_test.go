@@ -132,18 +132,35 @@ func TestTracePlayback(t *testing.T) {
 	s.SetGlucoseTrace("synthetic", tr, now)
 	lc := s.state.lifeCount(now)
 	m := s.state.Glucose
-	if m.Kind != "trace" || m.Trace != "synthetic" || m.TraceStartMinute != lc+1 || m.TraceMinutes != 20 {
+	looped := withBridge(tr.Series, traceBridgeMinutes) // 20 minutes, then 15 back toward the start
+	if m.Kind != "trace" || m.Trace != "synthetic" || m.TraceStartMinute != lc-19 || m.TraceMinutes != 35 {
 		t.Fatalf("mode %+v at minute %d", m, lc)
 	}
-	if got := s.Reading(lc); got != 100 {
-		t.Errorf("the current minute changed: %d", got)
+	// The readings so far are replaced: the recording ends at the current
+	// minute, and before it the loop runs backwards to the end of the warmup.
+	if got := s.Reading(lc); got != 175 {
+		t.Errorf("the current minute is %d, want the recording's last, 175", got)
+	}
+	if got := s.Reading(lc - 19); got != 80 {
+		t.Errorf("the recording's first minute is %d, want 80", got)
+	}
+	warm := s.state.WarmupMinutes
+	if got, want := s.Reading(warm), looped[mod(warm-(lc-19), 35)]; got != want {
+		t.Errorf("the first minute after warmup is %d, want %d", got, want)
+	}
+	// The bridge leads from the end back toward the start without a jump.
+	for k := 20; k < 35; k++ {
+		if !(looped[k] < looped[k-1] && looped[k] > 80) {
+			t.Errorf("bridge %v", looped[19:])
+			break
+		}
 	}
 	h := s.History(60, 30, now)
 	if len(h.Ahead) != 30 {
 		t.Fatalf("%d ahead", len(h.Ahead))
 	}
 	for k, r := range h.Ahead {
-		if want := int(tr.Series[k%20]); r.MgDl != want || r.Estimate {
+		if want := int(looped[(20+k)%35]); r.MgDl != want || r.Estimate {
 			t.Errorf("ahead %d: %+v, want %d", k, r, want)
 		}
 	}
@@ -162,7 +179,7 @@ func TestTracePlayback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.Glucose != m || len(back.TraceSeries) != 20 || back.model(lc+1+45) != float64(tr.Series[5]) {
+	if back.Glucose != m || len(back.TraceSeries) != 35 || back.model(lc+1+45) != float64(looped[(20+45)%35]) {
 		t.Errorf("restored %+v, %d minutes", back.Glucose, len(back.TraceSeries))
 	}
 	// Another model drops the trace.

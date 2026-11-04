@@ -292,12 +292,12 @@ const kindNotes = {
   sine: 'Rises and falls around mg/dL by the amplitude, once per period.',
   fixed: 'The same reading every minute.',
   walk: 'Wanders randomly around mg/dL, drifting back toward it.',
-  trace: 'Plays back a real sensor\'s readings, about 8 hours, then loops. It starts at the next minute (after the warmup, if the sensor is still warming up).'
+  trace: 'Plays back a real sensor\'s readings, about 8 hours, in a loop. It replaces the readings so far, so the chart shows the recording ending now; from the next minute it loops back to its start.'
 };
 function kindChanged() {
   const k = val('kind'), trace = k.startsWith('trace:');
   el('valueField').hidden = trace; el('ampField').hidden = k !== 'sine'; el('periodField').hidden = k !== 'sine';
-  el('kindNote').textContent = kindNotes[trace ? 'trace' : k] + ' A new model applies from the next minute on; minutes already made up stay as they were.';
+  el('kindNote').textContent = kindNotes[trace ? 'trace' : k] + (trace ? '' : ' A new model applies from the next minute on; minutes already made up stay as they were.');
 }
 // traceLabel is "Sensor 1 (recorded 2018-04-07, 8 h)" for a trace whose file
 // starts "// Sensor 1, recorded 2018-04-07".
