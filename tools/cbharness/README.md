@@ -45,5 +45,10 @@ Modes (env):
   (`requiresDelayedReconnect` is false for the Libre 2). Packets are counted across reconnects.
 - `TOLERATE_ERRORS=1`: print a plugin error (such as a CRC failure) and keep going, instead of failing. Use it with
   `POST /fault {"kind":"badcrc"}` to check that the plugin decodes the packets after a bad one.
+- `INJECT_GEN2=1` (**test only**): skip LibreTransmitter's NFC pairing and take the NFC results from libre2sim's
+  `POST /gen2/test-pairing` (Gen2 mode on), then run the normal path: LibreTransmitter's Gen2 BLE login and frames. For
+  checking the Gen2 BLE path while LibreTransmitter's own Gen2 NFC pairing cannot run against the sensor
+  (see `tools/gen2nfcprobe`). Build with the Gen2 files too: add `Libre2Gen2,Libre2Gen2Credentials` to the
+  `SensorContents` list and `Libre2Gen2DirectHandler` to the `Transmitter` list (on a LibreTransmitter with Gen2 support).
 - `TIMEOUT=s`: give up after s seconds (default 150). The harness prints `RESULT: FAIL timeout`, which is the
   expected end for a run that checks that packets stop (terminate, expiry).
