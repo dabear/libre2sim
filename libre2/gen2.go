@@ -140,8 +140,7 @@ func (g *Gen2Sensor) Accept(req []byte) ([]byte, error) {
 	copy(resp, hostRandom)
 	copy(resp[7:23], context)
 	cryptCTR(&rk, authNonce(g.Provisioning.salt(), g.counter, TransportBLE, 1), resp[:23])
-	crc := libreCRC16(resp[:23])
-	resp[23], resp[24] = byte(crc>>8), byte(crc) // sim's choice; unchecked on BLE
+	putCRC(resp[:23], resp[23:]) // sim's choice; unchecked on BLE
 	g.sessionKey = &sk
 	return resp, nil
 }

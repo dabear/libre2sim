@@ -174,9 +174,19 @@ func (s *Sensor) nfcGen2(params []byte, now time.Time) ([]byte, error) {
 			log.Printf("NFC: Gen2 streaming enabled; BLE name %s", st.AdvertisedName())
 			s.events.Add(CatNFC, "streaming-enabled", "Gen2 streaming enabled (authenticated 0x1E); BLE name %s", st.AdvertisedName())
 			return g.nfcCommandReply(hostRandom, payload), nil
+		case gen2NFCActivate:
+			// Juggluco's Gen2.activate checks only that the reply carries 5
+			// bytes. Their meaning is unknown: sim's choice, zeros. A sensor
+			// already started answers the same (sim's choice).
+			if st.Activated == nil {
+				at := now.Truncate(time.Second)
+				st.Activated = &at
+				s.lastSaved = -1
+				s.changed()
+				s.events.Add(CatNFC, "activated", "activated over NFC (Gen2 0x1B) at %s", at.Format(time.RFC3339))
+			}
+			return g.nfcCommandReply(hostRandom, make([]byte, 5)), nil
 		default:
-			// 0x1B (activate) and anything else: not emulated (sim's
-			// choice; POST /activate starts the sensor instead).
 			return nil, &NFCError{nfcErrNotSupported, fmt.Sprintf("authenticated command 0x%02x is not emulated", cmd)}
 		}
 
@@ -186,6 +196,56 @@ func (s *Sensor) nfcGen2(params []byte, now time.Time) ([]byte, error) {
 		return nil, &NFCError{nfcErrFormat, "enable streaming: a Gen2 sensor needs the authenticated 0x1E (A1 20 challenge first)"}
 	}
 	return nil, &NFCError{nfcErrNotSupported, fmt.Sprintf("unsupported Gen2 command 0xa1 with parameters %x", params)}
+}
+
+// Gen2TestPairing is what a successful Gen2 NFC pairing yields, handed out
+// without one, and it enables streaming as that pairing's 0x1E would. It is
+// for tests only (POST /gen2/test-pairing): a way to give an app the NFC
+// results when its own Gen2 NFC pairing cannot run against this sensor.
+// tools/gen2bridge checks that Juggluco's NFC flow yields these same values.
+type Gen2TestPairing struct {
+	UID               string `json:"uid"`               // sensorUID order
+	PatchInfo         string `json:"patchInfo"`         // as reported (Gen2)
+	FRAM              string `json:"fram"`              // decrypted, 344 bytes
+	RootSlot          int    `json:"rootSlot"`          // what A1 22 reports
+	StreamingAuthData string `json:"streamingAuthData"` // the 10-byte BLE provisioning
+	BLEAddress        string `json:"bleAddress"`        // display order
+}
+
+// Gen2TestPairing returns the NFC results and enables Gen2 streaming; an
+// error unless Gen2 mode is on and the sensor is running.
+func (s *Sensor) Gen2TestPairing(now time.Time) (*Gen2TestPairing, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.state
+	switch {
+	case !st.Gen2:
+		return nil, fmt.Errorf("Gen2 mode is off")
+	case !st.running(now):
+		return nil, fmt.Errorf("the sensor is not running")
+	}
+	g, err := s.gen2Sensor()
+	if err != nil {
+		return nil, err
+	}
+	st.Gen2StreamingEnabled = true
+	s.save()
+	s.events.Add(CatNFC, "streaming-enabled", "Gen2 streaming enabled by POST /gen2/test-pairing (test only, no NFC)")
+	return &Gen2TestPairing{UID: st.UID, PatchInfo: hex.EncodeToString(st.patchInfo()),
+		FRAM: hex.EncodeToString(st.plainFRAM(now)), RootSlot: g.RootSlot,
+		StreamingAuthData: hex.EncodeToString(g.Provisioning[:]), BLEAddress: st.BLEAddress}, nil
+}
+
+// Gen2LoginChallenge, Gen2LoginAccept and Gen2FrameNotifies are the BLE login
+// and frames without a link, for cmd/gen2sensor's socket bridge.
+func (s *Sensor) Gen2LoginChallenge(now time.Time) ([]byte, error) { return s.gen2Challenge(now) }
+func (s *Sensor) Gen2LoginAccept(req []byte, now time.Time) ([]byte, error) {
+	return s.gen2Accept(req, now)
+}
+func (s *Sensor) Gen2FrameNotifies(lc int) ([][]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gen2Notifies(lc, "")
 }
 
 // gen2Challenge starts a BLE login: the 14-byte challenge for F001.

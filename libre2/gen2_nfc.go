@@ -74,9 +74,26 @@ func (g *Gen2Sensor) NFCChallenge() []byte {
 	return c
 }
 
+// gen2CRC is protocol.c's l2g2_crc16 in libreCRC16's byte order: the same
+// CRC, except that an odd-length input is padded with a zero byte. The NFC
+// challenge and replies CRC 23 bytes, so the padding matters there; every
+// Gen1 region, and a BLE frame's 42 bytes, are even.
+func gen2CRC(data []byte) uint16 {
+	if len(data)%2 == 1 {
+		data = append(append([]byte(nil), data...), 0)
+	}
+	return libreCRC16(data)
+}
+
+// gen2CRCValid is matches_crc: the CRC of b[:len-2] in its last two bytes.
+func gen2CRCValid(b []byte) bool {
+	n := len(b)
+	return n >= 2 && gen2CRC(b[:n-2]) == word(b[n-2], b[n-1])
+}
+
 // putCRC writes the CRC of data into dst[0:2] as matches_crc reads it.
 func putCRC(data, dst []byte) {
-	crc := libreCRC16(data)
+	crc := gen2CRC(data)
 	dst[0], dst[1] = byte(crc>>8), byte(crc)
 }
 

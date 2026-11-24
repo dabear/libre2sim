@@ -5,6 +5,7 @@ package libre2
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"sync"
 	"testing"
@@ -69,7 +70,7 @@ func (h *gen2Host) readSlot() {
 func (h *gen2Host) authRequest(cmd byte) []byte {
 	h.t.Helper()
 	c := h.mustCustom(gen2NFCReadChallenge)
-	if len(c) != 25 || !packetCRCValid(c[:25]) {
+	if len(c) != 25 || !gen2CRCValid(c[:25]) {
 		h.t.Fatalf("challenge %x: bad length or CRC", c)
 	}
 	h.sensorRandom = append([]byte(nil), c[:7]...)
@@ -86,7 +87,7 @@ func (h *gen2Host) authRequest(cmd byte) []byte {
 // open decrypts a 0x1F reply (header ‖ 23 ‖ CRC) into the data key.
 func (h *gen2Host) open(r []byte) [speckKeySize]byte {
 	h.t.Helper()
-	if len(r) != 33 || !packetCRCValid(r[8:]) {
+	if len(r) != 33 || !gen2CRCValid(r[8:]) {
 		h.t.Fatalf("0x1F reply %x", r)
 	}
 	pt := append([]byte(nil), r[8:31]...)
@@ -103,7 +104,7 @@ func (h *gen2Host) open(r []byte) [speckKeySize]byte {
 func (h *gen2Host) commandReply(r []byte, size int) []byte {
 	h.t.Helper()
 	enc := size + 14
-	if len(r) != 8+enc+2 || !packetCRCValid(r[8:]) {
+	if len(r) != 8+enc+2 || !gen2CRCValid(r[8:]) {
 		h.t.Fatalf("command reply %x", r)
 	}
 	pt := append([]byte(nil), r[8:8+enc]...)
@@ -238,9 +239,9 @@ func TestGen2NFCRefusals(t *testing.T) {
 	if _, err := h.custom(req...); nfcCode(err) != nfcErrFormat {
 		t.Errorf("replayed: %v", err)
 	}
-	// Activation over NFC is not emulated.
-	if _, err := h.custom(h.authRequest(gen2NFCActivate)...); nfcCode(err) != nfcErrNotSupported {
-		t.Errorf("0x1B: %v", err)
+	// An unknown authenticated command.
+	if _, err := h.custom(h.authRequest(0x1c)...); nfcCode(err) != nfcErrNotSupported {
+		t.Errorf("0x1C: %v", err)
 	}
 	if s.Status()["streamingEnabled"] != false {
 		t.Fatal("a refused command enabled streaming")
@@ -456,5 +457,70 @@ func TestGen2OffIsGen1(t *testing.T) {
 	got := link.await(t, CharNotify, 3)
 	if len(got[0]) != 20 || len(got[1]) != 20 || len(got[2]) != 6 {
 		t.Fatalf("Gen1 packet as %d, %d, %d", len(got[0]), len(got[1]), len(got[2]))
+	}
+}
+
+// 0x1B activates a sensor still in its applicator; the reply carries 5 bytes.
+func TestGen2NFCActivate(t *testing.T) {
+	st, err := NewState(15, time.Hour, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSensor(st, t.TempDir()+"/state.json")
+	s.SetGen2(true)
+	h := newGen2Host(t, s, st)
+	h.readSlot()
+	if st.Activated != nil {
+		t.Fatal("activated already")
+	}
+	if p := h.commandReply(h.mustCustom(h.authRequest(gen2NFCActivate)...), 5); len(p) != 5 {
+		t.Fatalf("payload %x", p)
+	}
+	if st.Activated == nil {
+		t.Fatal("0x1B did not activate")
+	}
+	// Again on a started sensor: the same 5-byte answer.
+	h.commandReply(h.mustCustom(h.authRequest(gen2NFCActivate)...), 5)
+}
+
+// The test-only pairing hands out what the NFC flow yields.
+func TestGen2TestPairingMatchesNFC(t *testing.T) {
+	s, st := gen2Sensor(t)
+	if _, err := NewSensor(bleState(t, time.Hour), t.TempDir()+"/s.json").Gen2TestPairing(time.Now()); err == nil {
+		t.Fatal("test pairing with Gen2 off")
+	}
+	tp, err := s.Gen2TestPairing(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Advertising(time.Now()) {
+		t.Fatal("test pairing did not enable streaming")
+	}
+	h := newGen2Host(t, s, st)
+	h.readSlot()
+	fram := h.readFRAM()
+	addr, prov := h.enableStreaming()
+	if tp.RootSlot != h.slot || tp.StreamingAuthData != hex.EncodeToString(prov[:]) ||
+		tp.FRAM != hex.EncodeToString(fram) || tp.UID != st.UID || tp.PatchInfo[4:6] != "39" ||
+		hex.EncodeToString(addr) != hex.EncodeToString(st.macLE()) {
+		t.Fatalf("test pairing %+v differs from the NFC flow (slot %d prov %x)", tp, h.slot, prov)
+	}
+}
+
+// gen2CRC pads odd input as protocol.c's l2g2_crc16 does, and is libreCRC16
+// on even input. The vector is l2g2_crc16 over 01 02 03, compiled from
+// Juggluco's protocol.c (0x5201, stored 01 52).
+func TestGen2CRCOddPadding(t *testing.T) {
+	if gen2CRC([]byte{1, 2, 3}) != libreCRC16([]byte{1, 2, 3, 0}) {
+		t.Fatal("odd input not padded")
+	}
+	even := []byte{1, 2, 3, 4}
+	if gen2CRC(even) != libreCRC16(even) {
+		t.Fatal("even input changed")
+	}
+	b := []byte{1, 2, 3, 0, 0}
+	putCRC(b[:3], b[3:])
+	if b[3] != 0x01 || b[4] != 0x52 {
+		t.Fatalf("CRC bytes %x, want 0152 (l2g2_crc16 = 0x5201, little-endian)", b[3:])
 	}
 }

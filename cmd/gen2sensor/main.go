@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// gen2sensor plays a FreeStyle Libre 2 Gen2 sensor over TCP, so a Gen2 client
-// (Juggluco's protocol.c via tools/gen2bridge, or another implementation) can
-// be checked against it without a real sensor. BLE is a byte pipe; the socket
-// carries each BLE message whole, in order:
+// gen2sensor plays a FreeStyle Libre 2 Gen2 sensor (libre2sim's Sensor in Gen2
+// mode) over TCP, so a Gen2 client (Juggluco's protocol.c via
+// tools/gen2bridge, or another implementation) can be checked against it
+// without a real sensor. Each message goes whole, in order.
 //
-//	client → 0x20; sensor → 14 challenge; client → 19 auth request;
-//	sensor → 25 auth response; sensor → 46-byte frames.
+// With -nfc the client first runs the NFC side: it sends 'N', then NFC
+// custom commands 0xA1 as [len][parameters], each answered [status][len]
+// [reply] (status 0, or the NFC error code with no reply), the reply as
+// CoreNFC returns it; len 0 ends the NFC phase. Without -nfc NFC is mocked:
+// streaming is enabled as POST /gen2/test-pairing does.
 //
-// NFC is mocked: on start it prints one JSON line with the UID, provisioning
-// and root slot the client needs, and for each frame it sends a JSON line with
-// the 44-byte plaintext it encrypted, so the client's output can be compared.
+// Then BLE: client → 0x20; sensor → 14 challenge; client → 19 auth request;
+// sensor → 25 auth response; sensor → 46-byte frames.
+//
+// It prints JSON lines: first the sensor's identity (addr, uid, slot,
+// provisioning, bleAddress); with -nfc, after the NFC phase, the plain FRAM
+// and whether NFC enabled streaming; then each frame's 44-byte plaintext and
+// the notify sizes it goes out as over BLE.
 package main
 
 import (
@@ -31,74 +38,91 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "listen address")
 	slot := flag.Int("slot", 1, "root slot (1 or 2)")
-	frames := flag.Int("frames", 5, "frames to send per connection")
+	frames := flag.Int("frames", 5, "frames to send")
 	age := flag.Duration("age", 3*time.Hour, "sensor age")
-	provHex := flag.String("provisioning", "", "10-byte provisioning hex (default random)")
-	once := flag.Bool("once", true, "exit after one connection")
+	nfc := flag.Bool("nfc", false, "the client runs the Gen2 NFC flow first")
 	flag.Parse()
 
 	state, err := libre2.NewState(15, time.Hour, *age)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var prov libre2.Gen2Provisioning
-	if *provHex != "" {
-		b, err := hex.DecodeString(*provHex)
-		if err != nil || len(b) != len(prov) {
-			log.Fatalf("provisioning: want %d bytes of hex", len(prov))
-		}
-		copy(prov[:], b)
-	} else if _, err := io.ReadFull(randReader{}, prov[:]); err != nil {
-		log.Fatal(err)
-	}
-	sensor, err := libre2.NewGen2Sensor(state.Gen2UID(), *slot, prov, nil)
+	state.SetGen2(true)
+	state.Gen2RootSlot = *slot
+	dir, err := os.MkdirTemp("", "gen2sensor")
 	if err != nil {
 		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sensor := libre2.NewSensor(state, dir+"/state.json")
+	if !*nfc {
+		if _, err := sensor.Gen2TestPairing(time.Now()); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		log.Fatal(err)
 	}
+	stream, _ := hex.DecodeString(state.Gen2Stream)
 	out := json.NewEncoder(os.Stdout)
 	out.Encode(map[string]any{
 		"addr":         ln.Addr().String(),
-		"uid":          hex.EncodeToString(state.Gen2UID()),
-		"provisioning": hex.EncodeToString(prov[:]),
+		"uid":          state.UID,
+		"provisioning": hex.EncodeToString(stream[:libre2.Gen2ProvisioningSize]),
 		"slot":         *slot,
+		"bleAddress":   state.BLEAddress,
 	})
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := serve(c, sensor, state, *frames, out); err != nil {
-			log.Printf("connection: %v", err)
-			if *once {
-				os.Exit(1)
-			}
-		}
-		c.Close()
-		if *once {
-			return
-		}
+	c, err := ln.Accept()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+	if err := serve(c, sensor, state, *frames, *nfc, out); err != nil {
+		log.Printf("connection: %v", err)
+		os.Exit(1)
 	}
 }
 
-func serve(c net.Conn, g *libre2.Gen2Sensor, s *libre2.State, frames int, out *json.Encoder) error {
+func serve(c net.Conn, s *libre2.Sensor, st *libre2.State, frames int, nfc bool, out *json.Encoder) error {
 	r := bufio.NewReader(c)
-	kick, err := r.ReadByte()
-	if err != nil || kick != 0x20 {
-		return fmt.Errorf("want kickoff 0x20, got %#x (%v)", kick, err)
+	first, err := r.ReadByte()
+	if err != nil {
+		return err
 	}
-	if _, err := c.Write(g.Challenge()); err != nil {
+	if first == 'N' {
+		if !nfc {
+			return fmt.Errorf("client wants NFC; run with -nfc")
+		}
+		if err := serveNFC(r, c, s); err != nil {
+			return err
+		}
+		enabled := s.Status()["streamingEnabled"] == true
+		tp, err := s.Gen2TestPairing(time.Now()) // only to report the FRAM; NFC already enabled streaming or not
+		if err != nil {
+			return err
+		}
+		out.Encode(map[string]any{"nfc": "done", "streamingEnabledByNFC": enabled, "fram": tp.FRAM})
+		if first, err = r.ReadByte(); err != nil {
+			return err
+		}
+	}
+	if first != 0x20 {
+		return fmt.Errorf("want kickoff 0x20, got %#x", first)
+	}
+	ch, err := s.Gen2LoginChallenge(time.Now())
+	if err != nil {
+		return err
+	}
+	if _, err := c.Write(ch); err != nil {
 		return err
 	}
 	req := make([]byte, libre2.Gen2AuthRequestSize)
 	if _, err := io.ReadFull(r, req); err != nil {
 		return err
 	}
-	resp, err := g.Accept(req)
+	resp, err := s.Gen2LoginAccept(req, time.Now())
 	if err != nil {
 		out.Encode(map[string]any{"auth": "rejected", "error": err.Error()})
 		return err
@@ -107,28 +131,52 @@ func serve(c net.Conn, g *libre2.Gen2Sensor, s *libre2.State, frames int, out *j
 		return err
 	}
 	out.Encode(map[string]any{"auth": "ok"})
-	lc := s.LifeCount(time.Now())
+	lc := st.LifeCount(time.Now())
 	for i := 0; i < frames; i++ {
-		plain := s.Gen2PacketPlain(lc + i)
-		f, err := g.Frame(uint16(i+1), plain)
+		plain := st.Gen2PacketPlain(lc + i)
+		chunks, err := s.Gen2FrameNotifies(lc + i)
 		if err != nil {
 			return err
 		}
-		if _, err := c.Write(f); err != nil {
+		var frame []byte
+		var sizes []int
+		for _, ch := range chunks {
+			frame = append(frame, ch...)
+			sizes = append(sizes, len(ch))
+		}
+		if _, err := c.Write(frame); err != nil {
 			return err
 		}
-		out.Encode(map[string]any{"frame": i + 1, "plain": hex.EncodeToString(plain)})
+		out.Encode(map[string]any{"frame": i + 1, "plain": hex.EncodeToString(plain), "notifies": sizes})
 	}
 	return nil
 }
 
-type randReader struct{}
-
-func (randReader) Read(p []byte) (int, error) {
-	f, err := os.Open("/dev/urandom")
-	if err != nil {
-		return 0, err
+func serveNFC(r *bufio.Reader, w io.Writer, s *libre2.Sensor) error {
+	for {
+		n, err := r.ReadByte()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		params := make([]byte, n)
+		if _, err := io.ReadFull(r, params); err != nil {
+			return err
+		}
+		reply, err := s.NFCCustom(0xa1, params, time.Now())
+		status := byte(0)
+		if err != nil {
+			status = 0xff
+			if e, ok := err.(*libre2.NFCError); ok {
+				status = e.Code
+			}
+			log.Printf("NFC a1 %x: %v", params, err)
+			reply = nil
+		}
+		if _, err := w.Write(append([]byte{status, byte(len(reply))}, reply...)); err != nil {
+			return err
+		}
 	}
-	defer f.Close()
-	return io.ReadFull(f, p)
 }

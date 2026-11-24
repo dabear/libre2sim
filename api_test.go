@@ -653,3 +653,18 @@ func TestGen2ConfigOverHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestGen2TestPairingOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	if s, _ := call(t, srv, "POST", "/gen2/test-pairing", ""); s != http.StatusConflict {
+		t.Fatalf("Gen2 off: HTTP %d", s)
+	}
+	sensor.SetGen2(true)
+	s, r := call(t, srv, "POST", "/gen2/test-pairing", "")
+	if s != http.StatusOK || r["rootSlot"] != float64(1) || len(r["streamingAuthData"].(string)) != 20 || len(r["fram"].(string)) != 688 {
+		t.Fatalf("HTTP %d %v", s, r)
+	}
+	if !sensor.Advertising(time.Now()) {
+		t.Fatal("not advertising after the test pairing")
+	}
+}

@@ -54,6 +54,12 @@ import (
 //	                             the skin temperature the thermistor reads from the
 //	                             next minute on (20…42 °C), and how many minutes the
 //	                             tissue (which the raw glucose follows) lags it
+//	POST /gen2/test-pairing      TEST ONLY, Gen2 mode: what a successful Gen2 NFC
+//	                             pairing yields, without one ({uid,patchInfo,fram,
+//	                             rootSlot,streamingAuthData,bleAddress}), and Gen2
+//	                             streaming enabled; for an app whose own Gen2 NFC
+//	                             pairing cannot run. 409 with Gen2 off or the sensor
+//	                             not running
 //	POST /activate               start a sensor that is still in its applicator
 //	POST /end-warmup             end the warmup at the next minute; 409 unless in warmup
 //	                             (LibreTransmitter cannot); 409 if already started
@@ -247,6 +253,15 @@ func newAPI(sensor *libre2.Sensor) *api {
 		}
 		log.Printf("skin temperature now %.1f °C, tissue lag %g min", m.Celsius, m.TissueLagMinutes)
 		writeJSON(w, sensor.Status())
+	})
+	a.post("/gen2/test-pairing", func(w http.ResponseWriter, r *http.Request) {
+		p, err := sensor.Gen2TestPairing(time.Now())
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), 0)
+			return
+		}
+		log.Printf("Gen2 test pairing: NFC results handed out, streaming enabled (test only)")
+		writeJSON(w, p)
 	})
 	a.post("/activate", func(w http.ResponseWriter, r *http.Request) {
 		if err := sensor.Activate(time.Now()); err != nil {
