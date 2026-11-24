@@ -229,6 +229,11 @@ Every check below runs LibreTransmitter's own Swift, not a re-implementation of 
   real `Libre2DirectTransmitter` plugin through pairing, scan, connect, unlock and streaming.
 - [tools/algoharness](tools/algoharness/README.md): runs a LibreTransmitter checkout's own glucose algorithm on libre2sim's
   records, for scenarios such as a skin temperature step with the tissue lagging, and reports how far each minute is off.
+- [tools/gen2bridge](tools/gen2bridge/run.sh): the **Gen2** login and frames (`cmd/gen2sensor`, over TCP with NFC mocked)
+  against two real clients, Juggluco's `protocol.c` and LibreTransmitter's `Libre2Gen2.swift`, for root slots 1 and 2.
+  It passes when the handshake completes, every frame CRC checks and the decrypted plaintext matches. Both sources are
+  fetched when it runs. This checks the crypto and framing only: it does not exercise BLE chunking, the NFC enable-streaming
+  step or a real sensor.
 
 `GO111MODULE=on go test -race ./...` runs the Go tests. [docs/scenarios.md](docs/scenarios.md) lists the manual scenarios for
 Loop and which ones have been run. The LibreTransmitter change was merged as
@@ -246,4 +251,8 @@ Loop and which ones have been run. The LibreTransmitter change was merged as
   clones it and applies a few small patches. The transport's two fixes are in
   [docs/libre3sim-transport-fixes.md](docs/libre3sim-transport-fixes.md).
 
-libre2sim is MIT licensed (see `LICENSE`).
+- The Gen2 crypto (`libre2/gen2_crypto.go`) is a port of [Juggluco](https://github.com/j-kaltes/Juggluco)'s
+  `libre2_imp/gen2/protocol.c` (GPL-3.0, © Jaap Korthals Altes). It and the files built on it (`libre2/gen2*.go`,
+  `cmd/gen2sensor`, `tools/gen2bridge`) are therefore GPL-3.0-or-later, as their SPDX headers say.
+
+libre2sim is MIT licensed (see `LICENSE`), except the Gen2 files above, which are GPL-3.0-or-later.
