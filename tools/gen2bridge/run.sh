@@ -1,12 +1,19 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Cross-check libre2sim's Gen2 sensor (cmd/gen2sensor) against two Gen2
-# clients, for root slots 1 and 2:
-#   juggluco  Juggluco's protocol.{c,h} (GPL-3.0), via juggluco_client.c
-#   lt        LibreTransmitter's Libre2Gen2.swift + Libre2Gen2Credentials.swift,
-#             via lt_client.swift (macOS, swiftc)
-# Pass: the handshake completes, every frame's CRC checks, and each decrypted
-# plaintext equals what the sensor encrypted.
+# Cross-check libre2sim's Gen2 sensor (cmd/gen2sensor, the Sensor in Gen2
+# mode) against Gen2 clients, for root slots 1 and 2:
+#   juggluco      Juggluco's protocol.{c,h} (GPL-3.0), via juggluco_client.c:
+#                 BLE only, given the NFC results
+#   juggluco-nfc  the same, but first Juggluco's NFC flow (Gen2.java: root slot,
+#                 authenticated FRAM read, activate, enable streaming), then BLE
+#                 with what NFC gave
+#   lt            LibreTransmitter's Libre2Gen2.swift + Libre2Gen2Credentials.swift,
+#                 via lt_client.swift (macOS, swiftc): BLE only
+# Pass: the handshake completes, every frame's CRC checks, each decrypted
+# plaintext equals what the sensor encrypted, and frames go out as 20 + 18 + 8
+# notifies. juggluco-nfc also: NFC learns the sensor's slot and provisioning,
+# the decrypted FRAM equals the sensor's with valid CRCs, and the BLE address
+# matches.
 #
 # Sources are fetched at run time, not vendored. Overrides:
 #   JUGGLUCO_SRC=<dir>  protocol.c/.h      (default: Juggluco @ $JUGGLUCO_REV, primary)
@@ -19,7 +26,7 @@ work=$(mktemp -d)
 spid=
 trap 'kill $spid 2>/dev/null || true; rm -rf "$work"' EXIT
 
-CLIENTS=${CLIENTS:-juggluco lt}
+CLIENTS=${CLIENTS:-juggluco juggluco-nfc lt}
 FRAMES=${FRAMES:-5}
 JUGGLUCO_REV=${JUGGLUCO_REV:-primary}
 LT_REPO=${LT_REPO:-bjorninge-no-personal/LibreTransmitterLibre2Gen2Experimental}
@@ -30,6 +37,7 @@ mkdir -p "$work/bin"
 
 for c in $CLIENTS; do
 	case $c in
+	juggluco-nfc) ;; # the juggluco binary
 	juggluco)
 		if [ -z "${JUGGLUCO_SRC:-}" ]; then
 			src=$work/juggluco; mkdir -p "$src"
@@ -56,21 +64,37 @@ fail=0
 for c in $CLIENTS; do
 	for slot in 1 2; do
 		log=$work/$c.$slot
-		"$work/gen2sensor" -slot "$slot" -frames "$FRAMES" >"$log.sensor" 2>&1 &
+		nfcflag=; [ "$c" = juggluco-nfc ] && nfcflag=-nfc
+		"$work/gen2sensor" $nfcflag -slot "$slot" -frames "$FRAMES" >"$log.sensor" 2>&1 &
 		spid=$!
 		while ! grep -q '"addr"' "$log.sensor" 2>/dev/null; do sleep 0.1; done
 		hdr=$(head -1 "$log.sensor")
 		field() { printf '%s' "$hdr" | sed -E "s/.*\"$1\":\"?([^\",}]*).*/\1/"; }
 		addr=$(field addr); uid=$(field uid); prov=$(field provisioning)
-		"$work/bin/$c" "${addr%:*}" "${addr##*:}" "$uid" "$prov" "$slot" "$FRAMES" >"$log.client" 2>&1 || true
+		case $c in
+		juggluco-nfc) "$work/bin/juggluco" "${addr%:*}" "${addr##*:}" "$uid" nfc - "$FRAMES" >"$log.client" 2>&1 || true ;;
+		*) "$work/bin/$c" "${addr%:*}" "${addr##*:}" "$uid" "$prov" "$slot" "$FRAMES" >"$log.client" 2>&1 || true ;;
+		esac
 		wait $spid || true
 		spid=
 		want=$(sed -n 's/.*"plain":"\([0-9a-f]*\)".*/\1/p' "$log.sensor")
 		got=$(sed -n 's/.*CRC OK plain=\([0-9a-f]*\).*/\1/p' "$log.client")
-		if grep -q 'HANDSHAKE OK' "$log.client" &&
-			[ "$(printf '%s\n' "$want" | grep -c .)" -eq "$FRAMES" ] &&
+		chunks=$(grep -c '"notifies":\[20,18,8\]' "$log.sensor" || true)
+		nfcok=yes nfcmsg=
+		if [ "$c" = juggluco-nfc ]; then
+			mac=$(field bleAddress | tr -d : | tr 'A-F' 'a-f' | sed 's/../& /g' | awk '{for(i=NF;i>0;i--)printf $i}')
+			framwant=$(sed -n 's/.*"fram":"\([0-9a-f]*\)".*/\1/p' "$log.sensor")
+			if grep -q '^NFC OK' "$log.client" && grep -q '^NFC framCRC=ok' "$log.client" && grep -q '^NFC activate=ok' "$log.client" &&
+				grep -q "^NFC slot=$slot\$" "$log.client" && grep -q "^NFC provisioning=$prov\$" "$log.client" &&
+				grep -q "^NFC address=$mac\$" "$log.client" && grep -q "^NFC fram=$framwant\$" "$log.client" &&
+				grep -q '"streamingEnabledByNFC":true' "$log.sensor"; then
+				nfcmsg="NFC: slot, provisioning, address, FRAM (CRCs ok) and activate match; "
+			else nfcok=no; fi
+		fi
+		if [ $nfcok = yes ] && grep -q 'HANDSHAKE OK' "$log.client" &&
+			[ "$(printf '%s\n' "$want" | grep -c .)" -eq "$FRAMES" ] && [ "$chunks" -eq "$FRAMES" ] &&
 			[ "$want" = "$got" ]; then
-			echo "$c slot $slot: PASS (handshake, $FRAMES/$FRAMES CRC, plaintext match)"
+			echo "$c slot $slot: PASS (${nfcmsg}handshake, $FRAMES/$FRAMES CRC, plaintext match, 20+18+8)"
 		else
 			echo "$c slot $slot: FAIL"; echo "--- sensor"; cat "$log.sensor"; echo "--- client"; cat "$log.client"
 			fail=1

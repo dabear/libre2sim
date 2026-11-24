@@ -146,6 +146,15 @@ var simServices = []gattService{
 	}},
 }
 
+// props is a characteristic's properties as the sensor's generation has
+// them: a Gen2 sensor's F001 also notifies, since its login rides on it.
+func (r *SimRadio) props(ch gattChar) int {
+	if ch.char == libre2.CharWrite && r.sensor.Gen2() {
+		return ch.props | propNotify
+	}
+	return ch.props
+}
+
 // peripheralID derives the identifier from the BLE address, so the app finds
 // the same peripheral again after either side restarts.
 func peripheralID(name string) string {
@@ -407,7 +416,7 @@ func (r *SimRadio) handle(c *simClient, msg map[string]interface{}) {
 			}
 			for ci, ch := range s.chars {
 				chars = append(chars, map[string]interface{}{
-					"id": fmt.Sprintf("%s:%s:%d", serviceID, ch.uuid, ci), "uuid": ch.uuid, "properties": ch.props})
+					"id": fmt.Sprintf("%s:%s:%d", serviceID, ch.uuid, ci), "uuid": ch.uuid, "properties": r.props(ch)})
 			}
 		}
 		c.send(map[string]interface{}{"type": "didDiscoverCharacteristics", "id": id,

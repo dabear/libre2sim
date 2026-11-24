@@ -1,6 +1,8 @@
 package libre2
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -34,11 +36,12 @@ type handler struct {
 	once   sync.Once
 
 	// Owned by run's goroutine.
-	opened     time.Time
-	subscribed bool // the central enabled F002 notifications
-	streaming  bool // a valid unlock arrived
-	sent       int  // life count of the last packet sent; -1 for none
-	done       bool // the sensor hung up
+	opened      time.Time
+	subscribed  bool // the central enabled F002 notifications
+	loginNotify bool // the central enabled F001 notifications (Gen2 login)
+	streaming   bool // a valid unlock arrived
+	sent        int  // life count of the last packet sent; -1 for none
+	done        bool // the sensor hung up
 }
 
 // NewHandler starts the sensor's side of a new link:
@@ -55,6 +58,15 @@ type handler struct {
 //     more and hangs up (sim's choice).
 //
 // A Libre 2 sends a packet as three notifies of 20, 20 and 6 bytes.
+//
+// In Gen2 mode (gen2_mode.go) the unlock is a login on F001 instead, as
+// LibreTransmitter's Libre2DirectTransmitter and Juggluco's
+// Libre2GattCallback both run it: the central enables F001 notifications and
+// writes 0x20; the sensor notifies a 14-byte challenge on F001; the central
+// writes the 19-byte auth request; the sensor notifies the 25-byte response
+// on F001 as 7 + 18 bytes and starts streaming frames on F002 as 20 + 18 + 8.
+// A login that fails makes the sensor hang up, as a bad unlock does (sim's
+// choice).
 func NewHandler(s *Sensor, l Link) Handler { return newHandler(s, l, defaultTiming) }
 
 func newHandler(s *Sensor, l Link, t handlerTiming) *handler {
@@ -113,6 +125,10 @@ func (h *handler) write(c Char, b []byte) {
 		return
 	}
 	now := h.t.now()
+	if h.s.Gen2() {
+		h.writeGen2(b, now)
+		return
+	}
 	n, err := h.s.unlock(b, now)
 	if err != nil {
 		k := h.s.unlockResult(false)
@@ -129,6 +145,10 @@ func (h *handler) write(c Char, b []byte) {
 }
 
 func (h *handler) subscribe(c Char, enabled bool) {
+	if c == CharWrite {
+		h.loginNotify = enabled
+		return
+	}
 	if c != CharNotify {
 		return
 	}
@@ -163,7 +183,11 @@ func (h *handler) send(now time.Time) {
 		return
 	}
 	h.sent = lc
-	for _, chunk := range h.s.notifies(lc) {
+	chunks := h.s.notifies(lc)
+	if len(chunks) == 0 {
+		return
+	}
+	for _, chunk := range chunks {
 		if err := h.link.Notify(CharNotify, chunk); err != nil {
 			log.Printf("%s packet for minute %d: %v", h.link.Addr(), lc, err)
 			return
@@ -182,4 +206,58 @@ func (h *handler) hangUp(why string) {
 	h.s.events.Add(CatBLE, "hang-up", "sensor hangs up: %s", why)
 	h.link.Close()
 	h.Closed()
+}
+
+// gen2ChallengeRequest is what a Gen2 central writes to F001 to ask for a
+// login challenge ("read security challenge").
+const gen2ChallengeRequest = 0x20
+
+// writeGen2 is a write to F001 on a Gen2 sensor: 0x20 asks for a challenge,
+// 19 bytes answer it.
+func (h *handler) writeGen2(b []byte, now time.Time) {
+	refuse := func(err error) {
+		k := h.s.unlockResult(false)
+		h.s.events.Add(CatBLE, "unlock-refused", "Gen2 login refused (%d so far): %v", k, err)
+		h.hangUp("bad Gen2 login: " + err.Error())
+	}
+	switch {
+	case len(b) == 1 && b[0] == gen2ChallengeRequest:
+		if !h.loginNotify {
+			// Both references enable F001 notifications first (sim's
+			// choice: without them the challenge has nowhere to go).
+			refuse(errors.New("challenge asked for before F001 notifications were enabled"))
+			return
+		}
+		ch, err := h.s.gen2Challenge(now)
+		if err != nil {
+			refuse(err)
+			return
+		}
+		h.streaming = false
+		if err := h.link.Notify(CharWrite, ch); err != nil {
+			log.Printf("%s Gen2 challenge: %v", h.link.Addr(), err)
+			return
+		}
+		h.s.events.Add(CatBLE, "gen2-challenge", "Gen2 login: challenge sent")
+	case len(b) == Gen2AuthRequestSize:
+		resp, err := h.s.gen2Accept(b, now)
+		if err != nil {
+			refuse(err)
+			return
+		}
+		for _, chunk := range [][]byte{resp[:7], resp[7:]} {
+			if err := h.link.Notify(CharWrite, chunk); err != nil {
+				log.Printf("%s Gen2 login response: %v", h.link.Addr(), err)
+				return
+			}
+		}
+		log.Printf("%s Gen2 login accepted", h.link.Addr())
+		k := h.s.unlockResult(true)
+		h.s.events.Add(CatBLE, "unlock-accepted", "Gen2 login accepted (%d so far)", k)
+		h.streaming = true
+		h.sent = -1
+		h.send(now)
+	default:
+		refuse(fmt.Errorf("unexpected %d-byte write %x", len(b), b))
+	}
 }

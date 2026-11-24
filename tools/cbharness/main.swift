@@ -22,6 +22,8 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
     var manager: CBCentralManager!
     var peripheral: CBPeripheral?
     var plugin: Libre2DirectTransmitter?
+    // as LibreTransmitterProxyManager keeps it, to pass with every value (a Gen2 login writes on it)
+    var writeCharacteristic: CBCharacteristic?
     var packets = 0
     let mac: String
 
@@ -79,6 +81,7 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
                 plugin?.didDiscoverNotificationCharacteristic(peripheral, notifyCharacteristic: c)
             }
             if c.uuid == Libre2DirectTransmitter.writeCharacteristic?.value {
+                writeCharacteristic = c
                 plugin?.didDiscoverWriteCharacteristics(peripheral, writeCharacteristics: c)
             }
         }
@@ -94,8 +97,9 @@ final class Central: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, L
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        // as LibreTransmitterProxyManager: values from F002 and (Gen2 login) F001
         guard let v = characteristic.value else { return }
-        plugin?.updateValueForNotifyCharacteristics(v, peripheral: peripheral, writeCharacteristic: nil)
+        plugin?.updateValueForNotifyCharacteristics(v, peripheral: peripheral, writeCharacteristic: writeCharacteristic)
     }
 
     // LibreTransmitterDelegate
@@ -139,17 +143,48 @@ if ProcessInfo.processInfo.environment["RECONNECT"] == "1" {
     DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { print("RESULT: FAIL timeout"); exit(1) }
     RunLoop.main.run()
 }
-let pairing = SimulatedSensorPairingService()
-pairing.onCancel = { print("RESULT: FAIL pairing"); exit(1) }
-pairing.publisher.sink { info in
+// As Libre2DirectSetup does after a scan.
+func paired(_ info: SensorPairingInfo) {
     guard let sd = info.sensorData, let mac = info.macAddress else { print("RESULT: FAIL no sensor data / mac"); exit(1) }
     calibration = sd.calibrationData
     // as Libre2DirectSetup does after a scan
-    UserDefaults.standard.preSelectedSensor = Sensor(uuid: info.uuid, patchInfo: info.patchInfo, maxAge: sd.maxMinutesWearTime, sensorName: info.sensorName, macAddress: mac)
+    UserDefaults.standard.preSelectedSensor = Sensor(uuid: info.uuid, patchInfo: info.patchInfo, maxAge: sd.maxMinutesWearTime, sensorName: info.sensorName, macAddress: mac,
+                                                     keyIndex: info.keyIndex, streamingAuthData: info.streamingAuthData)
     UserDefaults.standard.set(info.fram, forKey: "cbharness.fram")
-    print("paired: mac \(mac) state \(sd.state.description) age \(sd.minutesSinceStart)")
+    let gen = UserDefaults.standard.preSelectedSensor?.securityGeneration ?? 0
+    print("paired: mac \(mac) state \(sd.state.description) age \(sd.minutesSinceStart) generation \(gen)" +
+          (gen == 2 ? " rootSlot \(info.keyIndex ?? -1) streamingAuthData \(info.streamingAuthData?.hexEncodedString() ?? "nil")" : ""))
     central = Central(mac: mac)
-}.store(in: &bag)
-try pairing.pairSensor()
+}
+
+// INJECT_GEN2=1 (TEST ONLY): skip LibreTransmitter's NFC pairing and take the NFC results from
+// libre2sim's POST /gen2/test-pairing, which also enables Gen2 streaming. For checking the Gen2 BLE
+// path while LibreTransmitter's own Gen2 NFC pairing cannot run against the sensor
+// (tools/gen2nfcprobe shows where it stops). Everything after pairing is the normal path.
+if ProcessInfo.processInfo.environment["INJECT_GEN2"] == "1" {
+    struct TestPairing: Decodable { let uid, patchInfo, fram, streamingAuthData, bleAddress: String; let rootSlot: Int }
+    func bytes(_ hex: String) -> Data {
+        var b = [UInt8](); var i = hex.startIndex
+        while i < hex.endIndex { let j = hex.index(i, offsetBy: 2); b.append(UInt8(hex[i..<j], radix: 16)!); i = j }
+        return Data(b)
+    }
+    var req = URLRequest(url: SimulatedSensorPairingService.baseURL.appendingPathComponent("gen2/test-pairing"))
+    req.httpMethod = "POST"
+    URLSession.shared.dataTask(with: req) { data, _, _ in
+        guard let data, let p = try? JSONDecoder().decode(TestPairing.self, from: data) else {
+            print("RESULT: FAIL test pairing: \(String(data: data ?? Data(), encoding: .utf8) ?? "no reply")"); exit(1)
+        }
+        print("INJECTED (test only): rootSlot \(p.rootSlot) streamingAuthData \(p.streamingAuthData)")
+        let info = SensorPairingInfo(uuid: bytes(p.uid), patchInfo: bytes(p.patchInfo), fram: bytes(p.fram), streamingEnabled: true,
+                                     macAddress: p.bleAddress.replacingOccurrences(of: ":", with: ""),
+                                     keyIndex: p.rootSlot, streamingAuthData: bytes(p.streamingAuthData))
+        DispatchQueue.main.async { paired(info) }
+    }.resume()
+} else {
+    let pairing = SimulatedSensorPairingService()
+    pairing.onCancel = { print("RESULT: FAIL pairing"); exit(1) }
+    pairing.publisher.sink { info in paired(info) }.store(in: &bag)
+    try pairing.pairSensor()
+}
 DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { print("RESULT: FAIL timeout (packets \(central?.packets ?? 0))"); exit(1) }
 RunLoop.main.run()

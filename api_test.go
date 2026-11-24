@@ -614,3 +614,57 @@ func TestTemperatureOverHTTP(t *testing.T) {
 		t.Errorf("50 °C: HTTP %d, want 400", s)
 	}
 }
+
+// The Gen2 toggle: POST /config {"gen2":…}, shown in /config and /status,
+// and the patch info an app reads over NFC follows it.
+func TestGen2ConfigOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	patchInfo := func() string {
+		return hex.EncodeToString(nfc(t, srv, map[string]interface{}{"op": "custom", "code": 161, "parameters": ""}))
+	}
+	gen1 := patchInfo()
+	if gen1[4:6] != "31" {
+		t.Fatalf("Gen1 patch info %s", gen1)
+	}
+	if s, r := call(t, srv, "POST", "/config", `{"gen2":true}`); s != http.StatusOK || r["gen2"] != true {
+		t.Fatalf("POST /config gen2: HTTP %d %v", s, r)
+	}
+	if !sensor.Gen2() {
+		t.Fatal("gen2 not set")
+	}
+	var st map[string]interface{}
+	get(t, srv, "/status", &st)
+	if st["gen2"] != true || st["streamingEnabled"] != false {
+		t.Errorf("status gen2 %v streamingEnabled %v", st["gen2"], st["streamingEnabled"])
+	}
+	if p := patchInfo(); p[4:6] != "39" || p[:4] != gen1[:4] || p[6:] != gen1[6:] {
+		t.Errorf("Gen2 patch info %s (Gen1 %s)", p, gen1)
+	}
+	// Both settings in one request.
+	if s, r := call(t, srv, "POST", "/config", `{"gen2":false,"strictUnlock":true}`); s != http.StatusOK || r["gen2"] != false || r["strictUnlock"] != true {
+		t.Fatalf("POST /config both: HTTP %d %v", s, r)
+	}
+	if patchInfo() != gen1 {
+		t.Error("patch info not back to Gen1")
+	}
+	for _, body := range []string{`{"gen2":"yes"}`, `{"gen2":1}`} {
+		if s, _ := call(t, srv, "POST", "/config", body); s != http.StatusBadRequest {
+			t.Errorf("%q: HTTP %d", body, s)
+		}
+	}
+}
+
+func TestGen2TestPairingOverHTTP(t *testing.T) {
+	srv, sensor := newTestServer(t, 3*time.Hour)
+	if s, _ := call(t, srv, "POST", "/gen2/test-pairing", ""); s != http.StatusConflict {
+		t.Fatalf("Gen2 off: HTTP %d", s)
+	}
+	sensor.SetGen2(true)
+	s, r := call(t, srv, "POST", "/gen2/test-pairing", "")
+	if s != http.StatusOK || r["rootSlot"] != float64(1) || len(r["streamingAuthData"].(string)) != 20 || len(r["fram"].(string)) != 688 {
+		t.Fatalf("HTTP %d %v", s, r)
+	}
+	if !sensor.Advertising(time.Now()) {
+		t.Fatal("not advertising after the test pairing")
+	}
+}

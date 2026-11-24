@@ -246,7 +246,9 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
 <section class="page" id="page-settings">
   <div class="card"><h2>Live settings</h2>
     <label class="toggle"><input type="checkbox" id="strict" onchange="post('/config', {strictUnlock: this.checked}).then(loadConfig)"> Strict unlock: refuse replayed unlock counts</label>
-    <p class="note">The only setting that can change while libre2sim runs.</p></div>
+    <label class="toggle"><input type="checkbox" id="gen2" onchange="post('/config', {gen2: this.checked}).then(loadConfig)"> Gen2: security generation 2 (authenticated NFC, BLE login with a challenge)</label>
+    <p class="note">The settings that can change while libre2sim runs. Switching Gen2 disables streaming until an app enables it
+      again over NFC, and drops a connected phone. A new sensor keeps the generation.</p></div>
   <div class="grid g2" style="margin-top:20px">
     <div class="card"><h2>Launch (read-only)</h2><dl id="launch"></dl>
       <p class="note">The flags libre2sim was started with; change them by restarting it.</p></div>
@@ -714,6 +716,7 @@ async function loadConfig() {
   try {
     const c = await (await fetch('/config')).json();
     el('strict').checked = c.strictUnlock;
+    el('gen2').checked = c.gen2;
     fill(el('launch'), c.launch);
     fill(el('identity'), c.sensor);
   } catch (e) {}

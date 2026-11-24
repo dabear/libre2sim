@@ -38,8 +38,12 @@ import (
 //	GET  /events?since=<seq>     the event log, oldest first: {"last":seq,
 //	                             "events":[{seq,time,cat,kind,msg}]}
 //	GET  /config                 the launch configuration and the sensor's identity
-//	POST /config      {"strictUnlock":true}
-//	                             change a setting that is safe at run time
+//	POST /config      {"strictUnlock":true} or {"gen2":true}
+//	                             change a setting that is safe at run time. gen2
+//	                             switches the sensor's security generation (Gen2
+//	                             mode): streaming is disabled until an app enables
+//	                             it again over NFC, and a connected phone is
+//	                             dropped. POST /new keeps the generation
 //	POST /glucose     {"kind":"fixed","value":65}
 //	                  {"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}
 //	                  {"kind":"walk","value":140}
@@ -50,6 +54,12 @@ import (
 //	                             the skin temperature the thermistor reads from the
 //	                             next minute on (20…42 °C), and how many minutes the
 //	                             tissue (which the raw glucose follows) lags it
+//	POST /gen2/test-pairing      TEST ONLY, Gen2 mode: what a successful Gen2 NFC
+//	                             pairing yields, without one ({uid,patchInfo,fram,
+//	                             rootSlot,streamingAuthData,bleAddress}), and Gen2
+//	                             streaming enabled; for an app whose own Gen2 NFC
+//	                             pairing cannot run. 409 with Gen2 off or the sensor
+//	                             not running
 //	POST /activate               start a sensor that is still in its applicator
 //	POST /end-warmup             end the warmup at the next minute; 409 unless in warmup
 //	                             (LibreTransmitter cannot); 409 if already started
@@ -158,14 +168,22 @@ func newAPI(sensor *libre2.Sensor) *api {
 		case http.MethodPost:
 			var req struct {
 				StrictUnlock *bool `json:"strictUnlock"`
+				Gen2         *bool `json:"gen2"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.StrictUnlock == nil {
-				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false}`, 0)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.StrictUnlock == nil && req.Gen2 == nil) {
+				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false} or {"gen2":true|false}`, 0)
 				return
 			}
-			sensor.SetStrictUnlock(*req.StrictUnlock)
-			log.Printf("strict unlock now %v", *req.StrictUnlock)
-			sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
+			if req.StrictUnlock != nil {
+				sensor.SetStrictUnlock(*req.StrictUnlock)
+				log.Printf("strict unlock now %v", *req.StrictUnlock)
+				sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
+			}
+			if req.Gen2 != nil && sensor.SetGen2(*req.Gen2) && a.radio != nil {
+				// Like swapping the sensor's security: the phone's link,
+				// made under the old generation, goes.
+				a.radio.Disconnect()
+			}
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "GET or POST /config", 0)
 			return
@@ -235,6 +253,15 @@ func newAPI(sensor *libre2.Sensor) *api {
 		}
 		log.Printf("skin temperature now %.1f °C, tissue lag %g min", m.Celsius, m.TissueLagMinutes)
 		writeJSON(w, sensor.Status())
+	})
+	a.post("/gen2/test-pairing", func(w http.ResponseWriter, r *http.Request) {
+		p, err := sensor.Gen2TestPairing(time.Now())
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), 0)
+			return
+		}
+		log.Printf("Gen2 test pairing: NFC results handed out, streaming enabled (test only)")
+		writeJSON(w, p)
 	})
 	a.post("/activate", func(w http.ResponseWriter, r *http.Request) {
 		if err := sensor.Activate(time.Now()); err != nil {
@@ -341,7 +368,7 @@ func (a *api) config() map[string]interface{} {
 	st := a.sensor.Status()
 	sensor := map[string]interface{}{}
 	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration", "temperature",
-		"wearMinutes", "warmupMinutes", "activated", "streamingCode"} {
+		"wearMinutes", "warmupMinutes", "activated", "streamingCode", "gen2"} {
 		if v, ok := st[k]; ok {
 			sensor[k] = v
 		}
@@ -353,6 +380,7 @@ func (a *api) config() map[string]interface{} {
 	return map[string]interface{}{
 		"launch":       launch,
 		"strictUnlock": a.sensor.StrictUnlock(),
+		"gen2":         a.sensor.Gen2(),
 		"sensor":       sensor,
 	}
 }

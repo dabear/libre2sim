@@ -81,6 +81,18 @@ type State struct {
 	// TraceSeries is the trace a "trace" glucose mode plays, kept here so a
 	// restart plays on even if its file is gone.
 	TraceSeries []uint16 `json:"traceSeries,omitempty"`
+
+	// Gen2 is Gen2 mode (gen2_mode.go): the sensor reports security
+	// generation 2 and speaks the Gen2 NFC and BLE protocols. Off, none of
+	// the Gen2 fields below are used or saved.
+	Gen2 bool `json:"gen2,omitempty"`
+	// Gen2RootSlot is the root slot A1 22 reports (1 or 2).
+	Gen2RootSlot int `json:"gen2RootSlot,omitempty"`
+	// Gen2Stream is the sensor's fixed Gen2 stream parameters, hex:
+	// streamPrefix(4) ‖ salt(3) ‖ provisioning tail(3) ‖ NFC epoch(2).
+	Gen2Stream string `json:"gen2Stream,omitempty"`
+	// Gen2StreamingEnabled is set by an authenticated Gen2 enable-streaming.
+	Gen2StreamingEnabled bool `json:"gen2StreamingEnabled,omitempty"`
 }
 
 // TemperatureMode is the skin temperature the sensor's thermistor reads, and
@@ -165,7 +177,7 @@ func (s *State) validate() error {
 }
 
 func (s *State) uid() []byte       { return hexBytes(s.UID) }
-func (s *State) patchInfo() []byte { return hexBytes(s.PatchInfo) }
+func (s *State) patchInfo() []byte { return s.effectivePatchInfo() }
 
 // macLE is the BLE address least significant byte first, as the
 // enable-streaming command returns it.

@@ -43,7 +43,7 @@ func (s *Sensor) Advertising(now time.Time) bool {
 }
 
 func (s *Sensor) advertising(now time.Time) bool {
-	return s.state.running(now) && s.state.StreamingCode != nil && s.links == 0 && !now.Before(s.outOfRange)
+	return s.state.running(now) && s.state.streamingEnabled() && s.links == 0 && !now.Before(s.outOfRange)
 }
 
 // InRange is whether the phone can hear the sensor at now.
@@ -96,6 +96,8 @@ func (s *Sensor) unlock(b []byte, now time.Time) (uint16, error) {
 	defer s.mu.Unlock()
 	st := s.state
 	switch {
+	case st.Gen2:
+		return 0, fmt.Errorf("a Gen2 sensor logs in with 0x20 and a challenge, not a Gen1 unlock")
 	case len(b) != unlockSize:
 		return 0, fmt.Errorf("unlock is %d bytes, want %d", len(b), unlockSize)
 	case st.StreamingCode == nil:
