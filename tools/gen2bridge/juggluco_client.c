@@ -26,10 +26,10 @@ static void ph(const char*t,const uint8_t*b,int n){printf("%s",t);for(int i=0;i<
 
 int main(int argc,char**argv){
     if(!l2g2_cipher_self_test()){fprintf(stderr,"Juggluco Speck self-test FAILED\n");return 2;}
-    if(argc<6){fprintf(stderr,"usage: %s host port uidHex provisioningHex rootSlot [commandHex]\n",argv[0]);return 2;}
+    if(argc<6){fprintf(stderr,"usage: %s host port uidHex provisioningHex rootSlot [frames]\n",argv[0]);return 2;}
     const char*host=argv[1]; int port=atoi(argv[2]);
     uint8_t uid[8],prov[10]; int uidn=hexparse(argv[3],uid,8); int provn=hexparse(argv[4],prov,10);
-    int slot=atoi(argv[5]); uint8_t command=0x1f; if(argc>6){uint8_t c;if(hexparse(argv[6],&c,1)==1)command=c;}
+    int slot=atoi(argv[5]); const uint8_t command=0x1f; int maxframes=argc>6?atoi(argv[6]):5;
     if(uidn!=8||provn!=10){fprintf(stderr,"need 8-byte uid and 10-byte provisioning (got %d,%d)\n",uidn,provn);return 2;}
 
     uint8_t sensor_key[16];
@@ -59,7 +59,7 @@ int main(int argc,char**argv){
 
     int frames=0,ok=0;
     uint8_t frame[46],out[46];
-    while(readn(fd,frame,46)==0){
+    while(frames<maxframes && readn(fd,frame,46)==0){
         frames++;
         bool d=l2g2_decrypt_ble_frame(session_key,ex.stream_prefix,frame,46,out);
         uint16_t crc=l2g2_crc16(out+2,42); uint16_t want=out[44]|(out[45]<<8);
