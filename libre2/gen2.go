@@ -57,6 +57,9 @@ type Gen2Sensor struct {
 	UID          []byte // 8 bytes, as read over NFC
 	RootSlot     int    // 1 or 2
 	Provisioning Gen2Provisioning
+	// Epoch is the NFC epoch the NFC challenge carries and the NFC data nonce
+	// uses (protocol.c's nfc_epoch). Not used over BLE.
+	Epoch [2]byte
 
 	sensorKey    [speckKeySize]byte
 	counter      uint32
@@ -64,6 +67,12 @@ type Gen2Sensor struct {
 	challenged   bool
 	sessionKey   *[speckKeySize]byte
 	random       func(n int) []byte
+
+	// The NFC exchange (gen2_nfc.go): its own outstanding challenge, and the
+	// data key an authenticated FRAM read (0x1F) established.
+	nfcRandom     [gen2RandomSize]byte
+	nfcChallenged bool
+	dataKey       *[speckKeySize]byte
 }
 
 // NewGen2Sensor derives the sensor key. random supplies the sensor random and
@@ -148,6 +157,20 @@ func (g *Gen2Sensor) Frame(seq uint16, plain44 []byte) ([]byte, error) {
 	}
 	return encryptBLEFrame(*g.sessionKey, g.Provisioning.streamPrefix(), byte(seq), byte(seq>>8), plain44[:bleFrameDataSz])
 }
+
+// frameAsIs encrypts plain44 without checking or rewriting its CRC, for the
+// badcrc fault.
+func (g *Gen2Sensor) frameAsIs(seq uint16, plain44 []byte) []byte {
+	frame := make([]byte, bleFrameSize)
+	frame[0], frame[1] = byte(seq), byte(seq>>8)
+	copy(frame[2:], plain44)
+	rk := newSpeckKey(g.sessionKey[:])
+	cryptCTR(&rk, bleFrameNonce(g.Provisioning.streamPrefix(), frame[0], frame[1]), frame[2:])
+	return frame
+}
+
+// LoggedIn is whether a BLE login completed since the last challenge.
+func (g *Gen2Sensor) LoggedIn() bool { return g.sessionKey != nil }
 
 // Gen2PacketPlain is the 44-byte Gen1-layout plaintext for life count lc,
 // for feeding Frame.

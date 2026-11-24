@@ -60,6 +60,11 @@ func (s *Sensor) readBlocks(first, count int, now time.Time) ([][]byte, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.state.Gen2 {
+		// A Gen2 sensor's FRAM is read with the authenticated A1 21 (sim's
+		// choice of answer to the standard read: not supported).
+		return nil, &NFCError{nfcErrNotSupported, "a Gen2 sensor's FRAM is read with A1 20, an authenticated 0x1F and A1 21"}
+	}
 	// A scan reads the FRAM in 15 requests. The sim builds the image once, at
 	// block 0, and serves the rest of the scan from it (sim's choice), so a
 	// minute ticking over mid-scan cannot leave the app with blocks from two
@@ -95,6 +100,9 @@ func (s *Sensor) NFCCustom(code byte, params []byte, now time.Time) ([]byte, err
 	switch {
 	case code == cmdA1 && len(params) == 0:
 		return st.patchInfo(), nil
+
+	case code == cmdA1 && st.Gen2:
+		return s.nfcGen2(params, now)
 
 	case code == cmdA1 && len(params) == 9 && params[0] == subcmdEnableStreaming:
 		unlock := binary.LittleEndian.Uint32(params[1:5])

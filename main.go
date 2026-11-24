@@ -138,6 +138,10 @@ func main() {
 			log.Printf("new sensor: %v", err)
 			return
 		}
+		// A new sensor keeps the generation the toggle is set to.
+		if sensor.Gen2() {
+			next.SetGen2(true)
+		}
 		sensor.Retire()
 		radio.Stop()
 		if err := next.Save(*statePath); err != nil {

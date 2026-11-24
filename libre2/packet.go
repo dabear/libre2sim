@@ -221,6 +221,18 @@ func (s *Sensor) notifies(lc int) [][]byte {
 	defer s.mu.Unlock()
 	fault := s.fault
 	s.fault = ""
+	if s.state.Gen2 {
+		chunks, err := s.gen2Notifies(lc, fault)
+		if err != nil {
+			log.Printf("minute %d: %v", lc, err)
+			return nil
+		}
+		if fault != "" {
+			log.Printf("sending the frame for minute %d with fault %s", lc, fault)
+			s.events.Add(CatSensor, "fault-fired", "fault %s spoiled the Gen2 frame for minute %d", fault, lc)
+		}
+		return chunks
+	}
 	pkt := s.packetLocked(lc, fault == FaultBadCRC)
 	if fault == FaultShort {
 		pkt = pkt[:shortPacketSize]

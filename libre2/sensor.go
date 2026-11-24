@@ -1,6 +1,7 @@
 package libre2
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -23,6 +24,11 @@ type Sensor struct {
 	// taken at framAt (see readBlocks).
 	fram   []byte
 	framAt time.Time
+
+	// Gen2 mode (gen2_mode.go): the protocol state, rebuilt from the state
+	// file when needed, and the plain FRAM image a Gen2 scan is reading.
+	gen2     *Gen2Sensor
+	gen2FRAM []byte
 
 	// The BLE side (see ble.go). None of it is saved.
 	links        int       // links up: 1 while a central holds the link
@@ -246,13 +252,14 @@ func (s *Sensor) Status() map[string]interface{} {
 	out := map[string]interface{}{
 		"uid":              st.UID,
 		"serial":           st.Serial(),
-		"patchInfo":        st.PatchInfo,
+		"patchInfo":        hex.EncodeToString(st.patchInfo()),
+		"gen2":             st.Gen2,
 		"bleAddress":       st.BLEAddress,
 		"advertisedName":   st.AdvertisedName(),
 		"framState":        st.framState(now),
 		"wearMinutes":      st.WearMinutes,
 		"warmupMinutes":    st.WarmupMinutes,
-		"streamingEnabled": st.StreamingCode != nil,
+		"streamingEnabled": st.streamingEnabled(),
 		"unlockCount":      st.UnlockCount,
 		"calibration":      st.Calibration.info(),
 		"temperature":      st.measurementTemperature(),

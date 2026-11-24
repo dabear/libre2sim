@@ -38,8 +38,12 @@ import (
 //	GET  /events?since=<seq>     the event log, oldest first: {"last":seq,
 //	                             "events":[{seq,time,cat,kind,msg}]}
 //	GET  /config                 the launch configuration and the sensor's identity
-//	POST /config      {"strictUnlock":true}
-//	                             change a setting that is safe at run time
+//	POST /config      {"strictUnlock":true} or {"gen2":true}
+//	                             change a setting that is safe at run time. gen2
+//	                             switches the sensor's security generation (Gen2
+//	                             mode): streaming is disabled until an app enables
+//	                             it again over NFC, and a connected phone is
+//	                             dropped. POST /new keeps the generation
 //	POST /glucose     {"kind":"fixed","value":65}
 //	                  {"kind":"sine","value":120,"amplitude":40,"periodMinutes":240}
 //	                  {"kind":"walk","value":140}
@@ -158,14 +162,22 @@ func newAPI(sensor *libre2.Sensor) *api {
 		case http.MethodPost:
 			var req struct {
 				StrictUnlock *bool `json:"strictUnlock"`
+				Gen2         *bool `json:"gen2"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.StrictUnlock == nil {
-				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false}`, 0)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.StrictUnlock == nil && req.Gen2 == nil) {
+				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false} or {"gen2":true|false}`, 0)
 				return
 			}
-			sensor.SetStrictUnlock(*req.StrictUnlock)
-			log.Printf("strict unlock now %v", *req.StrictUnlock)
-			sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
+			if req.StrictUnlock != nil {
+				sensor.SetStrictUnlock(*req.StrictUnlock)
+				log.Printf("strict unlock now %v", *req.StrictUnlock)
+				sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
+			}
+			if req.Gen2 != nil && sensor.SetGen2(*req.Gen2) && a.radio != nil {
+				// Like swapping the sensor's security: the phone's link,
+				// made under the old generation, goes.
+				a.radio.Disconnect()
+			}
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "GET or POST /config", 0)
 			return
@@ -341,7 +353,7 @@ func (a *api) config() map[string]interface{} {
 	st := a.sensor.Status()
 	sensor := map[string]interface{}{}
 	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration", "temperature",
-		"wearMinutes", "warmupMinutes", "activated", "streamingCode"} {
+		"wearMinutes", "warmupMinutes", "activated", "streamingCode", "gen2"} {
 		if v, ok := st[k]; ok {
 			sensor[k] = v
 		}
@@ -353,6 +365,7 @@ func (a *api) config() map[string]interface{} {
 	return map[string]interface{}{
 		"launch":       launch,
 		"strictUnlock": a.sensor.StrictUnlock(),
+		"gen2":         a.sensor.Gen2(),
 		"sensor":       sensor,
 	}
 }
