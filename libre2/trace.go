@@ -77,33 +77,64 @@ func ParseTrace(text string) (*Trace, error) {
 // trend minutes are the trend's values. Records with raw glucose 0 (none)
 // are skipped.
 func DecodeTraceFRAM(fram []byte) ([]uint16, error) {
+	xs, gy, _, err := traceKnots(fram)
+	if err != nil {
+		return nil, err
+	}
+	return traceGlucoseSeries(xs, gy), nil
+}
+
+// DecodeTraceFRAMFull is DecodeTraceFRAM plus the per-minute thermistor
+// temperature (°C), knotted at the same records and PCHIP-filled the same way,
+// so a replay can reproduce each reading's temperature as well as its glucose.
+func DecodeTraceFRAMFull(fram []byte) (mgdl []uint16, celsius []float64, err error) {
+	xs, gy, ty, err := traceKnots(fram)
+	if err != nil {
+		return nil, nil, err
+	}
+	return traceGlucoseSeries(xs, gy), pchipFill(xs, ty), nil
+}
+
+func traceGlucoseSeries(xs []int, ys []float64) []uint16 {
+	filled := pchipFill(xs, ys)
+	series := make([]uint16, len(filled))
+	for i, v := range filled {
+		series[i] = uint16(math.Round(clampGlucose(v)))
+	}
+	return series
+}
+
+// traceKnots parses a FRAM dump into sorted per-record minutes and the matching
+// glucose (mg/dL) and thermistor temperature (°C), each from the record with the
+// dump's own calibration; the newest trend record is at minutesSinceStart.
+// Records with raw glucose 0 (none) are skipped.
+func traceKnots(fram []byte) (xs []int, glucose, celsius []float64, err error) {
 	if len(fram) != framSize {
-		return nil, fmt.Errorf("a FRAM dump is %d bytes; this one is %d", framSize, len(fram))
+		return nil, nil, nil, fmt.Errorf("a FRAM dump is %d bytes; this one is %d", framSize, len(fram))
 	}
 	body := fram[bodyStart:footerStart]
 	if !framRegionCRCValid(body) {
-		return nil, errors.New("the FRAM body's CRC does not check: not an unencrypted Libre 1 or Libre 2 (EU) FRAM dump")
+		return nil, nil, nil, errors.New("the FRAM body's CRC does not check: not an unencrypted Libre 1 or Libre 2 (EU) FRAM dump")
 	}
 	nextTrend, nextHistory := int(body[2]), int(body[3])
 	if nextTrend >= trendRecords || nextHistory >= historyRecords {
-		return nil, fmt.Errorf("ring indices %d and %d: want under %d and %d", nextTrend, nextHistory, trendRecords, historyRecords)
+		return nil, nil, nil, fmt.Errorf("ring indices %d and %d: want under %d and %d", nextTrend, nextHistory, trendRecords, historyRecords)
 	}
 	cal := calibrationData(fram)
 	if cal.I2 < 1 || cal.I2 > len(t1) || cal.I4 == cal.I3 {
-		return nil, fmt.Errorf("the dump's calibration (i2 %d, i3 %d, i4 %d) is not usable", cal.I2, cal.I3, cal.I4)
+		return nil, nil, nil, fmt.Errorf("the dump's calibration (i2 %d, i3 %d, i4 %d) is not usable", cal.I2, cal.I3, cal.I4)
 	}
-	mgdl := func(rec []byte) (float64, bool) {
+	reading := func(rec []byte) (g, t float64, ok bool) {
 		m := parseMeasurement(rec)
 		if m.RawGlucose == 0 {
-			return 0, false
+			return 0, 0, false
 		}
-		v := cal.mgdlForRawAt(m.RawGlucose, cal.temperatureFor(m.RawTemperature, m.RawTemperatureAdjustment))
-		return v, !math.IsNaN(v) && !math.IsInf(v, 0)
+		t = cal.temperatureFor(m.RawTemperature, m.RawTemperatureAdjustment)
+		g = cal.mgdlForRawAt(m.RawGlucose, t)
+		return g, t, !math.IsNaN(g) && !math.IsInf(g, 0) && !math.IsNaN(t) && !math.IsInf(t, 0)
 	}
-
-	// Knots by minute, the newest trend record at minutesSinceStart.
 	minutes := int(body[minutesOffset]) | int(body[minutesOffset+1])<<8
-	knots := map[int]float64{}
+	gKnots, tKnots := map[int]float64{}, map[int]float64{}
 	delay := (minutes-3)%15 + 3
 	newestHistory := minutes - delay
 	if (minutes-3)/15%historyRecords != nextHistory {
@@ -111,34 +142,29 @@ func DecodeTraceFRAM(fram []byte) ([]uint16, error) {
 	}
 	for k := 0; k < historyRecords; k++ {
 		slot := mod(nextHistory-1-k, historyRecords)
-		if v, ok := mgdl(body[historyOffset+slot*measurementSize:]); ok {
-			knots[newestHistory-15*k] = v
+		if g, t, ok := reading(body[historyOffset+slot*measurementSize:]); ok {
+			gKnots[newestHistory-15*k], tKnots[newestHistory-15*k] = g, t
 		}
 	}
 	for k := 0; k < trendRecords; k++ {
 		slot := mod(nextTrend-1-k, trendRecords)
-		if v, ok := mgdl(body[trendOffset+slot*measurementSize:]); ok {
-			knots[minutes-k] = v
+		if g, t, ok := reading(body[trendOffset+slot*measurementSize:]); ok {
+			gKnots[minutes-k], tKnots[minutes-k] = g, t
 		}
 	}
-	if len(knots) < 2 {
-		return nil, fmt.Errorf("the dump has %d readings; a trace needs at least 2", len(knots))
+	if len(gKnots) < 2 {
+		return nil, nil, nil, fmt.Errorf("the dump has %d readings; a trace needs at least 2", len(gKnots))
 	}
-	xs := make([]int, 0, len(knots))
-	for x := range knots {
+	xs = make([]int, 0, len(gKnots))
+	for x := range gKnots {
 		xs = append(xs, x)
 	}
 	sort.Ints(xs)
-	ys := make([]float64, len(xs))
+	glucose, celsius = make([]float64, len(xs)), make([]float64, len(xs))
 	for i, x := range xs {
-		ys[i] = knots[x]
+		glucose[i], celsius[i] = gKnots[x], tKnots[x]
 	}
-	filled := pchipFill(xs, ys)
-	series := make([]uint16, len(filled))
-	for i, v := range filled {
-		series[i] = uint16(math.Round(clampGlucose(v)))
-	}
-	return series, nil
+	return xs, glucose, celsius, nil
 }
 
 // pchipFill is the monotone cubic (PCHIP, Fritsch–Carlson) through the knots
