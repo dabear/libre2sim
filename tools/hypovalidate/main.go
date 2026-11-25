@@ -53,7 +53,10 @@ type scenario struct {
 	// tempFn, when set, gives the skin temperature (°C) at each minute, applied
 	// every minute (trace replay uses it to reproduce each reading's temperature).
 	tempFn func(m int) float64
-	mins   int // window length in minutes
+	// adjFn, when set with tempFn, gives each minute's raw temperature
+	// adjustment (trace replay: the dump's records' own, not the sim default).
+	adjFn func(m int) int
+	mins  int // window length in minutes
 }
 
 // ramp builds a piecewise-linear trajectory from (minute,value) knots.
@@ -92,23 +95,23 @@ func init() {
 }
 
 var scenarios = []scenario{
-	{"steady-40", "fixed 40 mg/dL (hypo floor of the reportable range)", func(int) float64 { return 40 }, nil, nil, 90},
-	{"steady-54", "fixed 54 mg/dL (clinical level-2 hypo)", func(int) float64 { return 54 }, nil, nil, 90},
-	{"steady-70", "fixed 70 mg/dL (hypo threshold)", func(int) float64 { return 70 }, nil, nil, 90},
+	{"steady-40", "fixed 40 mg/dL (hypo floor of the reportable range)", func(int) float64 { return 40 }, nil, nil, nil, 90},
+	{"steady-54", "fixed 54 mg/dL (clinical level-2 hypo)", func(int) float64 { return 54 }, nil, nil, nil, 90},
+	{"steady-70", "fixed 70 mg/dL (hypo threshold)", func(int) float64 { return 70 }, nil, nil, nil, 90},
 	{"fall-slow", "110 → 45 at −1 mg/dL/min, then hold 45",
-		ramp([][2]float64{{0, 110}, {65, 45}, {120, 45}}), nil, nil, 120},
+		ramp([][2]float64{{0, 110}, {65, 45}, {120, 45}}), nil, nil, nil, 120},
 	{"fall-fast", "110 → 45 at −3 mg/dL/min, hold, then +2/min recovery",
-		ramp([][2]float64{{0, 110}, {22, 45}, {45, 45}, {78, 110}, {120, 110}}), nil, nil, 120},
+		ramp([][2]float64{{0, 110}, {22, 45}, {45, 45}, {78, 110}, {120, 110}}), nil, nil, nil, 120},
 	{"vshape", "110 → 45 (−3) → hold 10 → 110 (+2): projection on fall then rise",
-		ramp([][2]float64{{0, 110}, {22, 45}, {32, 45}, {65, 110}, {120, 110}}), nil, nil, 120},
+		ramp([][2]float64{{0, 110}, {22, 45}, {32, 45}, {65, 110}, {120, 110}}), nil, nil, nil, 120},
 	{"double-dip", "110→55→80→50→100: repeated lows (state & projection)",
-		ramp([][2]float64{{0, 110}, {25, 55}, {45, 80}, {70, 50}, {110, 100}, {120, 100}}), nil, nil, 120},
+		ramp([][2]float64{{0, 110}, {25, 55}, {45, 80}, {70, 50}, {110, 100}, {120, 100}}), nil, nil, nil, 120},
 	{"fall-cold", "fall to 45, THEN skin 31.6→26 °C (lag 5) at min 70 while already low: thermistor error at a true low",
 		ramp([][2]float64{{0, 110}, {65, 45}, {120, 45}}),
-		[]tempStep{{70, 26, 5}}, nil, 120},
+		[]tempStep{{70, 26, 5}}, nil, nil, 120},
 	{"steady-54-cold", "fixed 54 mg/dL, skin 31.6→27 °C (lag 5) at min 30: isolates temp error at a fixed low",
 		func(int) float64 { return 54 },
-		[]tempStep{{30, 27, 5}}, nil, 90},
+		[]tempStep{{30, 27, 5}}, nil, nil, 90},
 }
 
 func main() {
@@ -139,7 +142,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		series, temps, err := libre2.DecodeTraceFRAMFull(fram)
+		series, temps, adjs, err := libre2.DecodeTraceFRAMFull(fram)
 		if err != nil {
 			panic(err)
 		}
@@ -163,6 +166,7 @@ func main() {
 			about:  fmt.Sprintf("real sensor trajectory, %d min, %d→%d mg/dL", len(series), series[0], series[len(series)-1]),
 			mgdl:   func(m int) float64 { return float64(series[clampIdx(m, len(series))]) },
 			tempFn: func(m int) float64 { return temps[clampIdx(m, len(temps))] },
+			adjFn:  func(m int) int { return adjs[clampIdx(m, len(adjs))] },
 			mins:   len(series) - 1,
 		}}
 	}
@@ -170,7 +174,7 @@ func main() {
 	// (truth==90 at the scan at minute 15) for the projection-horizon fit, plus a
 	// steady-90 baseline. projection(rate) = Abbott(ramp) − Abbott(steady-90).
 	if os.Getenv("HYPO_RAMPS") != "" {
-		scenarios = []scenario{{"steady-90", "fixed 90 mg/dL (projection baseline)", steadyAt(90), nil, nil, 30}}
+		scenarios = []scenario{{"steady-90", "fixed 90 mg/dL (projection baseline)", steadyAt(90), nil, nil, nil, 30}}
 		for _, r := range []float64{1, 2, 3, -1, -2, -3} {
 			rr := r
 			dir := "up"
@@ -214,7 +218,7 @@ func main() {
 					return 90
 				}
 				return 130
-			}, nil, nil, 45}}
+			}, nil, nil, nil, 45}}
 	}
 	if sw := os.Getenv("HYPO_SWEEP"); sw != "" {
 		scenarios = nil
@@ -239,6 +243,8 @@ func main() {
 			// Override only the calibration coefficients i1..i6 with the real
 			// sensor's; keep the default thermistor reference fields
 			// (RawTemperature/Adjustment) so the temperature model stays valid.
+			// The records' own temperature and adjustment come per minute via
+			// tempFn/adjFn below.
 			st.Calibration.I1 = traceCal.I1
 			st.Calibration.I2 = traceCal.I2
 			st.Calibration.I3 = traceCal.I3
@@ -264,9 +270,15 @@ func main() {
 				}
 				ti++
 			}
-			// Per-minute skin temperature (trace replay), no tissue lag.
+			// Per-minute skin temperature (trace replay), no tissue lag, with
+			// the record's own raw temperature adjustment when known.
 			if sc.tempFn != nil {
-				if err := s.SetTemperature(libre2.TemperatureMode{Celsius: sc.tempFn(m)}, at); err != nil {
+				tm := libre2.TemperatureMode{Celsius: sc.tempFn(m)}
+				if sc.adjFn != nil {
+					a := sc.adjFn(m)
+					tm.Adjustment = &a
+				}
+				if err := s.SetTemperature(tm, at); err != nil {
 					panic(err)
 				}
 			}

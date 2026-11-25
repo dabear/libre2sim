@@ -79,6 +79,10 @@ type State struct {
 	// shorter than Readings; those minutes use the calibration's temperature.
 	SkinRaw       []uint16  `json:"skinRaw,omitempty"`
 	TissueCelsius []float64 `json:"tissueCelsius,omitempty"`
+	// SkinAdjustment holds, by life count, the raw temperature adjustment each
+	// minute's record carries. Minutes saved before it existed use the
+	// calibration's.
+	SkinAdjustment []int `json:"skinAdjustment,omitempty"`
 	// TraceSeries is the trace a "trace" glucose mode plays, kept here so a
 	// restart plays on even if its file is gone.
 	TraceSeries []uint16 `json:"traceSeries,omitempty"`
@@ -105,6 +109,24 @@ type State struct {
 type TemperatureMode struct {
 	Celsius          float64 `json:"celsius"`
 	TissueLagMinutes float64 `json:"tissueLagMinutes"`
+	// Adjustment is the raw temperature adjustment the records carry (a
+	// multiple of 4, as records hold it >> 2, with a sign); nil is the
+	// calibration's. A real sensor's records each carry their own.
+	Adjustment *int `json:"adjustment,omitempty"`
+}
+
+// setting is the raw temperature, raw temperature adjustment and tissue lag
+// of the current temperature setting.
+func (s *State) setting() (raw, adj int, lag float64) {
+	c := s.Calibration
+	raw, adj = c.RawTemperature, c.RawTemperatureAdjustment
+	if t := s.Temperature; t != nil {
+		if t.Adjustment != nil {
+			adj = *t.Adjustment
+		}
+		raw, lag = c.rawTemperatureForAdjustment(t.Celsius, adj), t.TissueLagMinutes
+	}
+	return raw, adj, lag
 }
 
 // NewState makes a sensor fresh from its applicator: not yet activated. A
@@ -217,6 +239,9 @@ func (s *State) fill(lc int) {
 		s.SkinRaw = append(s.SkinRaw, uint16(s.Calibration.RawTemperature))
 		s.TissueCelsius = append(s.TissueCelsius, s.Calibration.temperature())
 	}
+	for len(s.SkinAdjustment) < len(s.SkinRaw) { // a state saved without adjustments
+		s.SkinAdjustment = append(s.SkinAdjustment, s.Calibration.RawTemperatureAdjustment)
+	}
 	for len(s.Readings) <= lc && len(s.Readings) <= s.WearMinutes {
 		i := len(s.Readings)
 		s.fillTemperature()
@@ -231,27 +256,25 @@ func (s *State) fill(lc int) {
 
 // fillTemperature makes up the next minute's skin and tissue temperature.
 func (s *State) fillTemperature() {
-	skin, tissue := s.temperatureAfter(len(s.TissueCelsius) - 1)
+	skin, adj, tissue := s.temperatureAfter(len(s.TissueCelsius) - 1)
 	s.SkinRaw = append(s.SkinRaw, skin)
+	s.SkinAdjustment = append(s.SkinAdjustment, adj)
 	s.TissueCelsius = append(s.TissueCelsius, tissue)
 }
 
-// temperatureAfter is the skin raw temperature and tissue temperature of the
-// minute after prev under the current setting: the skin is the setting, the
-// tissue one minute's approach to it from minute prev's (none when prev < 0).
-func (s *State) temperatureAfter(prev int) (skin uint16, tissue float64) {
-	c := s.Calibration
-	raw, lag := c.RawTemperature, 0.0
-	if t := s.Temperature; t != nil {
-		raw, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
-	}
-	celsius := c.temperatureFor(raw, c.RawTemperatureAdjustment)
+// temperatureAfter is the skin raw temperature, its adjustment and the tissue
+// temperature of the minute after prev under the current setting: the skin is
+// the setting, the tissue one minute's approach to it from minute prev's (none
+// when prev < 0).
+func (s *State) temperatureAfter(prev int) (skin uint16, adj int, tissue float64) {
+	raw, adj, lag := s.setting()
+	celsius := s.Calibration.temperatureFor(raw, adj)
 	tissue = celsius
 	if prev >= 0 && prev < len(s.TissueCelsius) && lag > 0 {
 		p := s.TissueCelsius[prev]
 		tissue = p + (celsius-p)*(1-math.Exp(-1/lag))
 	}
-	return uint16(raw), tissue
+	return uint16(raw), adj, tissue
 }
 
 // setTemperature makes t the temperature from minute lc on, the current
@@ -261,7 +284,7 @@ func (s *State) setTemperature(t TemperatureMode, lc int) {
 	s.fill(lc - 1)
 	s.Temperature = &t
 	if lc >= 0 && lc < len(s.SkinRaw) {
-		s.SkinRaw[lc], s.TissueCelsius[lc] = s.temperatureAfter(lc - 1)
+		s.SkinRaw[lc], s.SkinAdjustment[lc], s.TissueCelsius[lc] = s.temperatureAfter(lc - 1)
 	}
 }
 
@@ -269,11 +292,15 @@ func (s *State) setTemperature(t TemperatureMode, lc int) {
 // the tissue temperature) and the thermistor's raw temperature and adjustment.
 func (s *State) record(minute int) (raw uint16, rawTemperature, rawTemperatureAdjustment int) {
 	c := s.Calibration
-	rawTemperature, tissue := c.RawTemperature, c.temperature()
+	rawTemperature, rawTemperatureAdjustment = c.RawTemperature, c.RawTemperatureAdjustment
+	tissue := c.temperature()
 	if minute >= 0 && minute < len(s.SkinRaw) {
 		rawTemperature, tissue = int(s.SkinRaw[minute]), s.TissueCelsius[minute]
 	}
-	return c.rawForGlucoseAt(s.reading(minute), tissue), rawTemperature, c.RawTemperatureAdjustment
+	if minute >= 0 && minute < len(s.SkinAdjustment) {
+		rawTemperatureAdjustment = s.SkinAdjustment[minute]
+	}
+	return c.rawForGlucoseAt(s.reading(minute), tissue), rawTemperature, rawTemperatureAdjustment
 }
 
 func (s *State) model(i int) float64 {

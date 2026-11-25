@@ -44,44 +44,50 @@ func (c Calibration) info() map[string]int {
 	return map[string]int{"i1": c.I1, "i2": c.I2, "i3": c.I3, "i4": c.I4, "i5": c.I5, "i6": c.I6}
 }
 
-// measurementTemperature is the temperature records carry from the next
-// minute on: the raw fields and the °C glucoseValueFromRaw makes of them, the
-// tissue's latest temperature and how far it lags the skin.
+// measurementTemperature is the temperature setting the records carry: the
+// raw fields and the °C glucoseValueFromRaw makes of them, the tissue's latest
+// temperature and how far it lags the skin.
 func (s *State) measurementTemperature() map[string]interface{} {
-	c := s.Calibration
-	raw, lag := c.RawTemperature, 0.0
-	if t := s.Temperature; t != nil {
-		raw, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
-	}
-	celsius := c.temperatureFor(raw, c.RawTemperatureAdjustment)
+	raw, adj, lag := s.setting()
+	celsius := s.Calibration.temperatureFor(raw, adj)
 	tissue := celsius
 	if n := len(s.TissueCelsius); n > 0 {
 		tissue = s.TissueCelsius[n-1]
 	}
-	return map[string]interface{}{"raw": raw, "adjustment": c.RawTemperatureAdjustment,
+	return map[string]interface{}{"raw": raw, "adjustment": adj,
 		"celsius": math.Round(celsius*10) / 10, "tissueCelsius": math.Round(tissue*10) / 10, "tissueLagMinutes": lag}
 }
 
-// rawTemperatureFor is the raw temperature field (a multiple of 4, as records
-// hold it >> 2) whose temperature is nearest celsius, with the calibration's
-// adjustment. The thermistor's temperature falls as the raw value rises.
+// rawTemperatureFor is rawTemperatureForAdjustment with the calibration's
+// adjustment.
 func (c Calibration) rawTemperatureFor(celsius float64) int {
+	return c.rawTemperatureForAdjustment(celsius, c.RawTemperatureAdjustment)
+}
+
+// rawTemperatureForAdjustment is the raw temperature field (a multiple of 4,
+// as records hold it >> 2) whose temperature with adjustment adj is nearest
+// celsius. The thermistor's temperature falls as the raw value rises.
+func (c Calibration) rawTemperatureForAdjustment(celsius float64, adj int) int {
 	lo, hi := 1, maxRawTemperature/4 // in units of 4
 	for lo < hi {
 		mid := (lo + hi) / 2
-		if c.temperatureFor(mid*4, c.RawTemperatureAdjustment) > celsius {
+		if c.temperatureFor(mid*4, adj) > celsius {
 			lo = mid + 1
 		} else {
 			hi = mid
 		}
 	}
 	best := lo
-	if lo > 1 && math.Abs(c.temperatureFor((lo-1)*4, c.RawTemperatureAdjustment)-celsius) <
-		math.Abs(c.temperatureFor(lo*4, c.RawTemperatureAdjustment)-celsius) {
+	if lo > 1 && math.Abs(c.temperatureFor((lo-1)*4, adj)-celsius) <
+		math.Abs(c.temperatureFor(lo*4, adj)-celsius) {
 		best = lo - 1
 	}
 	return best * 4
 }
+
+// maxRawTemperatureAdjustment is the largest |adjustment| a record holds
+// (9 bits << 2, the sign in a bit of its own).
+const maxRawTemperatureAdjustment = (1<<9 - 1) << 2
 
 // maxRawTemperature is the largest raw temperature a record holds (12 bits << 2).
 const maxRawTemperature = (1<<12 - 1) << 2

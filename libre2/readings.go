@@ -161,11 +161,10 @@ type RecordDetail struct {
 	BLE string `json:"ble"`
 }
 
-// recordDetail is how mgdl goes over BLE with raw temperature rawT, its raw
-// glucose made at tissue °C.
-func recordDetail(c Calibration, mgdl uint16, rawT int, tissue float64) RecordDetail {
+// recordDetail is how mgdl goes over BLE with raw temperature rawT and
+// adjustment adj, its raw glucose made at tissue °C.
+func recordDetail(c Calibration, mgdl uint16, rawT, adj int, tissue float64) RecordDetail {
 	raw := c.rawForGlucoseAt(mgdl, tissue)
-	adj := c.RawTemperatureAdjustment
 	b := make([]byte, bleRecordSize)
 	putBLERecord(b, raw, rawT, adj)
 	celsius := c.temperatureFor(rawT, adj)
@@ -212,12 +211,12 @@ func (s *Sensor) HistoryEvery(minutes, step, ahead int, now time.Time) History {
 		if step > 1 {
 			continue
 		}
-		_, rawT, _ := st.record(i)
+		_, rawT, adj := st.record(i)
 		tissue := st.Calibration.temperature()
 		if i < len(st.TissueCelsius) {
 			tissue = st.TissueCelsius[i]
 		}
-		h.Records = append(h.Records, recordDetail(st.Calibration, v, rawT, tissue))
+		h.Records = append(h.Records, recordDetail(st.Calibration, v, rawT, adj, tissue))
 	}
 	h.Next, h.Trend = s.nextReading(now), s.trend(now)
 	if ahead > 0 {
@@ -228,11 +227,8 @@ func (s *Sensor) HistoryEvery(minutes, step, ahead int, now time.Time) History {
 		// The coming minutes at the current temperature setting, the tissue
 		// still approaching it.
 		c := st.Calibration
-		rawT, lag := c.RawTemperature, 0.0
-		if t := st.Temperature; t != nil {
-			rawT, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
-		}
-		skin := c.temperatureFor(rawT, c.RawTemperatureAdjustment)
+		rawT, adj, lag := st.setting()
+		skin := c.temperatureFor(rawT, adj)
 		tissue := skin
 		if n := len(st.TissueCelsius); n > 0 {
 			tissue = st.TissueCelsius[n-1]
@@ -243,7 +239,7 @@ func (s *Sensor) HistoryEvery(minutes, step, ahead int, now time.Time) History {
 			} else {
 				tissue = skin
 			}
-			h.AheadRecords = append(h.AheadRecords, recordDetail(c, uint16(r.MgDl), rawT, tissue))
+			h.AheadRecords = append(h.AheadRecords, recordDetail(c, uint16(r.MgDl), rawT, adj, tissue))
 		}
 	}
 	return h

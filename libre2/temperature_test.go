@@ -135,9 +135,77 @@ func TestTemperatureOldState(t *testing.T) {
 	}
 }
 
+// A temperature setting with an adjustment puts that adjustment in the
+// records from the current minute on, with the raw temperature that gives the
+// set °C at it; earlier minutes keep theirs, and the app gets each reading back.
+func TestTemperatureAdjustment(t *testing.T) {
+	s, now := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
+	c := s.state.Calibration
+	lc := s.state.lifeCount(now)
+	s.Tick(now)
+	for k, a := range []int{0, -40, 8, 2044} {
+		a := a
+		at := now.Add(time.Duration(k) * time.Minute)
+		if err := s.SetTemperature(TemperatureMode{Celsius: 30, Adjustment: &a}, at); err != nil {
+			t.Fatal(err)
+		}
+		s.Tick(at)
+		m := lc + k
+		_, rawT, adj := s.state.record(m)
+		if adj != a {
+			t.Errorf("minute %d: adjustment %d, want %d", m, adj, a)
+		}
+		if got := c.temperatureFor(rawT, adj); math.Abs(got-30) > 0.05 {
+			t.Errorf("minute %d: %.2f °C with adjustment %d", m, got, adj)
+		}
+		if got := appAt(s, m); math.Round(got) != 100 {
+			t.Errorf("minute %d: the app gets %.2f, want 100", m, got)
+		}
+		// The packet and the FRAM carry it.
+		if r := parseMeasurement(recordBytes(s, m)); r.RawTemperatureAdjustment != a {
+			t.Errorf("minute %d: the encoded record has adjustment %d, want %d", m, r.RawTemperatureAdjustment, a)
+		}
+	}
+	if _, _, adj := s.state.record(lc - 1); adj != c.RawTemperatureAdjustment {
+		t.Errorf("the previous minute changed adjustment: %d", adj)
+	}
+	// Without an adjustment the setting goes back to the calibration's.
+	s.SetTemperature(TemperatureMode{Celsius: 30}, now.Add(4*time.Minute))
+	s.Tick(now.Add(4 * time.Minute))
+	if _, _, adj := s.state.record(lc + 4); adj != c.RawTemperatureAdjustment {
+		t.Errorf("no adjustment set: %d, want the calibration's %d", adj, c.RawTemperatureAdjustment)
+	}
+}
+
+// recordBytes is minute m's record as putMeasurement encodes it.
+func recordBytes(s *Sensor, m int) []byte {
+	raw, rawT, adj := s.state.record(m)
+	b := make([]byte, measurementSize)
+	putMeasurement(b, raw, rawT, adj)
+	return b
+}
+
+// A state saved before adjustments were kept gets the calibration's for its
+// old minutes, and new minutes line up with Readings.
+func TestTemperatureAdjustmentOldState(t *testing.T) {
+	s, now := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
+	s.state.fill(s.state.lifeCount(now))
+	s.state.SkinAdjustment = nil
+	n := len(s.state.Readings)
+	s.state.fill(n + 4)
+	if len(s.state.SkinAdjustment) != len(s.state.Readings) {
+		t.Fatalf("readings %d, adjustments %d", len(s.state.Readings), len(s.state.SkinAdjustment))
+	}
+	if _, _, adj := s.state.record(n - 1); adj != s.state.Calibration.RawTemperatureAdjustment {
+		t.Errorf("an old minute: adjustment %d", adj)
+	}
+}
+
 func TestSetTemperatureRange(t *testing.T) {
 	s, _ := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
-	for _, m := range []TemperatureMode{{Celsius: 19}, {Celsius: 43}, {Celsius: 30, TissueLagMinutes: -1}, {Celsius: 30, TissueLagMinutes: 61}} {
+	odd, big := 6, 2048
+	for _, m := range []TemperatureMode{{Celsius: 19}, {Celsius: 43}, {Celsius: 30, TissueLagMinutes: -1}, {Celsius: 30, TissueLagMinutes: 61},
+		{Celsius: 30, Adjustment: &odd}, {Celsius: 30, Adjustment: &big}} {
 		if s.SetTemperature(m, time.Now()) == nil {
 			t.Errorf("%+v accepted", m)
 		}

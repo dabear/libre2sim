@@ -226,6 +226,9 @@ func (s *Sensor) SetTemperature(m TemperatureMode, now time.Time) error {
 	if m.Celsius < minCelsius || m.Celsius > maxCelsius || m.TissueLagMinutes < 0 || m.TissueLagMinutes > 60 {
 		return fmt.Errorf("want celsius %g…%g and tissueLagMinutes 0…60", minCelsius, maxCelsius)
 	}
+	if a := m.Adjustment; a != nil && (*a%4 != 0 || *a < -maxRawTemperatureAdjustment || *a > maxRawTemperatureAdjustment) {
+		return fmt.Errorf("want adjustment a multiple of 4 in −%d…%d", maxRawTemperatureAdjustment, maxRawTemperatureAdjustment)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Activated != nil {
@@ -234,8 +237,9 @@ func (s *Sensor) SetTemperature(m TemperatureMode, now time.Time) error {
 		s.state.Temperature = &m
 	}
 	s.changed()
-	s.events.Add(CatSensor, "temperature", "skin temperature now %.1f °C (raw %d), the tissue lagging %g min",
-		m.Celsius, s.state.Calibration.rawTemperatureFor(m.Celsius), m.TissueLagMinutes)
+	raw, adj, _ := s.state.setting()
+	s.events.Add(CatSensor, "temperature", "skin temperature now %.1f °C (raw %d, adjustment %d), the tissue lagging %g min",
+		m.Celsius, raw, adj, m.TissueLagMinutes)
 	return nil
 }
 

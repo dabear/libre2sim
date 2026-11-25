@@ -52,6 +52,37 @@ func TestDecodeTraceFRAM(t *testing.T) {
 	}
 }
 
+// DecodeTraceFRAMFull returns each record's own temperature adjustment at its
+// minute, and holds it until the next record in between.
+func TestDecodeTraceFRAMFullAdjustment(t *testing.T) {
+	now := time.Now()
+	st := testState(t, now, 10*time.Hour)
+	st.Glucose = GlucoseMode{Kind: "sine", Value: 150, Amplitude: 60, PeriodMinutes: 200}
+	st.plainFRAM(now) // make the readings
+	for m := range st.SkinAdjustment {
+		st.SkinAdjustment[m] = 4*(m%7) - 12 // −12…12, negative ones too
+	}
+	series, _, adjs, err := DecodeTraceFRAMFull(st.plainFRAM(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adjs) != len(series) {
+		t.Fatalf("%d adjustments for %d minutes", len(adjs), len(series))
+	}
+	lc := 600
+	newestHistory := 15 * ((lc - 3) / 15)
+	first := newestHistory - 15*31
+	for m := first; m <= lc; m++ {
+		knot := m
+		if m < lc-15 {
+			knot = first + (m-first)/15*15 // the history record at or before m
+		}
+		if got, want := adjs[m-first], st.SkinAdjustment[knot]; got != want {
+			t.Errorf("minute %d: adjustment %d, want record %d's %d", m, got, knot, want)
+		}
+	}
+}
+
 func TestDecodeTraceFRAMRejects(t *testing.T) {
 	fram, _ := traceFRAM(t)
 	if _, err := DecodeTraceFRAM(fram[:343]); err == nil || !strings.Contains(err.Error(), "344") {
