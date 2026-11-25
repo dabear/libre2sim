@@ -77,7 +77,7 @@ for c in $CLIENTS; do
 		else src=$LT_SRC; fi
 		b=$work/ltnfcbuild; mkdir -p "$b"
 		if ! grep -q '^enum Libre2Gen2Pairing' "$src/SensorPairingService+Gen2.swift"; then
-			skip_ltnfc="no Libre2Gen2Pairing in $LT_REPO@$LT_REV (its Gen2 NFC pairing is the old, unauthenticated one; try LT_REV=gen2-nfc-pairing)"
+			skip_ltnfc="no Libre2Gen2Pairing in $LT_REPO@$LT_REV (its Gen2 NFC pairing is the old, unauthenticated one, before the fork's bf59b49)"
 			continue
 		fi
 		{ echo 'import Foundation'

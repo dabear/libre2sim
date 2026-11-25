@@ -21,6 +21,6 @@ PROBE: LT's Gen2 NFC pairing FAILS at 3 of 3 steps
 
 In LibreTransmitter's order step 1 already ends the pairing; steps 2 and 3 are shown to list every difference.
 
-The fork's `gen2-nfc-pairing` branch replaces `pairGen2` with the authenticated flow (`Libre2Gen2Pairing.pair`) and fixes
+The fork's `next-dev+libre2gen2` (since `bf59b49`, PR #1) replaces `pairGen2` with the authenticated flow (`Libre2Gen2Pairing.pair`) and fixes
 the odd-length CRC it depends on. That pairing is checked by `tools/gen2bridge`'s `lt-nfc` client and, end to end, by
-[cbharness](../cbharness/README.md) with Gen2 mode on and no `INJECT_GEN2`. This probe covers the old `pairGen2` only.
+[cbharness](../cbharness/README.md) with Gen2 mode on and no `INJECT_GEN2`. This probe covers the old `pairGen2` only (`f230205` and earlier).
