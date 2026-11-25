@@ -229,9 +229,10 @@ func (s *Sensor) SetTemperature(m TemperatureMode, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Activated != nil {
-		s.state.fill(s.state.lifeCount(now))
+		s.state.setTemperature(m, s.state.lifeCount(now))
+	} else {
+		s.state.Temperature = &m
 	}
-	s.state.Temperature = &m
 	s.changed()
 	s.events.Add(CatSensor, "temperature", "skin temperature now %.1f °C (raw %d), the tissue lagging %g min",
 		m.Celsius, s.state.Calibration.rawTemperatureFor(m.Celsius), m.TissueLagMinutes)

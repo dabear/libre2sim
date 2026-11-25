@@ -69,7 +69,8 @@ type State struct {
 	// Readings holds the glucose of every minute of wear, by life count; 0
 	// where the sensor had none (warmup).
 	Readings []uint16 `json:"readings"`
-	// Temperature is the skin temperature from the next minute on; nil is the
+	// Temperature is the skin temperature from the minute it was set on, that
+	// minute included; nil is the
 	// calibration's fixed temperature with no tissue lag.
 	Temperature *TemperatureMode `json:"temperature,omitempty"`
 	// SkinRaw and TissueCelsius hold, by life count like Readings, the raw
@@ -230,19 +231,38 @@ func (s *State) fill(lc int) {
 
 // fillTemperature makes up the next minute's skin and tissue temperature.
 func (s *State) fillTemperature() {
-	c := s.Calibration
-	skin, lag := c.RawTemperature, 0.0
-	if t := s.Temperature; t != nil {
-		skin, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
-	}
-	celsius := c.temperatureFor(skin, c.RawTemperatureAdjustment)
-	tissue := celsius
-	if n := len(s.TissueCelsius); n > 0 && lag > 0 {
-		prev := s.TissueCelsius[n-1]
-		tissue = prev + (celsius-prev)*(1-math.Exp(-1/lag))
-	}
-	s.SkinRaw = append(s.SkinRaw, uint16(skin))
+	skin, tissue := s.temperatureAfter(len(s.TissueCelsius) - 1)
+	s.SkinRaw = append(s.SkinRaw, skin)
 	s.TissueCelsius = append(s.TissueCelsius, tissue)
+}
+
+// temperatureAfter is the skin raw temperature and tissue temperature of the
+// minute after prev under the current setting: the skin is the setting, the
+// tissue one minute's approach to it from minute prev's (none when prev < 0).
+func (s *State) temperatureAfter(prev int) (skin uint16, tissue float64) {
+	c := s.Calibration
+	raw, lag := c.RawTemperature, 0.0
+	if t := s.Temperature; t != nil {
+		raw, lag = c.rawTemperatureFor(t.Celsius), t.TissueLagMinutes
+	}
+	celsius := c.temperatureFor(raw, c.RawTemperatureAdjustment)
+	tissue = celsius
+	if prev >= 0 && prev < len(s.TissueCelsius) && lag > 0 {
+		p := s.TissueCelsius[prev]
+		tissue = p + (celsius-p)*(1-math.Exp(-1/lag))
+	}
+	return uint16(raw), tissue
+}
+
+// setTemperature makes t the temperature from minute lc on, the current
+// minute included: lc's record carries it even if lc was already made.
+// Earlier minutes keep the temperature they were made at.
+func (s *State) setTemperature(t TemperatureMode, lc int) {
+	s.fill(lc - 1)
+	s.Temperature = &t
+	if lc >= 0 && lc < len(s.SkinRaw) {
+		s.SkinRaw[lc], s.TissueCelsius[lc] = s.temperatureAfter(lc - 1)
+	}
 }
 
 // record is what minute's measurement record holds: its raw glucose (made at

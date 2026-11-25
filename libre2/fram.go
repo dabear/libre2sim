@@ -120,6 +120,7 @@ func (s *State) framMinutes(now time.Time) int {
 // started are all zeros; minutes without a reading (warmup) have raw 0.
 func (s *State) plainFRAM(now time.Time) []byte {
 	f := append([]byte(nil), framTemplate...)
+	writeCalibration(f, s.Calibration) // keep the FRAM's calibration bits == State.Calibration
 	header, body, footer := f[headerStart:bodyStart], f[bodyStart:footerStart], f[footerStart:]
 
 	header[4] = s.framState(now)
@@ -200,3 +201,26 @@ func calibrationData(fram []byte) Calibration {
 }
 
 func mod(a, n int) int { return (a%n + n) % n }
+
+// writeCalibration is the inverse of calibrationData: it writes i1…i6 into the
+// FRAM's calibration bits (byte 2 and byte 0x150). plainFRAM calls it with
+// State.Calibration so the FRAM a sensor serves always carries that
+// calibration — a no-op by default (State.Calibration == framTemplate's), but
+// it lets the calibration be overridden (e.g. to a real sensor's) and keeps the
+// raw encoding and the FRAM's own bits consistent, so an app reading either agrees.
+func writeCalibration(fram []byte, c Calibration) {
+	mag, sign := c.I3, 0
+	if mag < 0 {
+		mag, sign = -mag, 1
+	}
+	writeBits(fram, 2, 0, 3, c.I1)
+	writeBits(fram, 2, 3, 0xa, c.I2)
+	writeBits(fram, 0x150, 0, 8, mag)
+	writeBits(fram, 0x150, 0x21, 1, sign)
+	writeBits(fram, 0x150, 8, 0xe, c.I4)
+	writeBits(fram, 0x150, 0x28, 0xc, c.I5>>2)
+	writeBits(fram, 0x150, 0x34, 0xc, c.I6>>2)
+}
+
+// CalibrationFromFRAM reads i1…i6 from an unencrypted Libre 1/2 FRAM dump.
+func CalibrationFromFRAM(fram []byte) Calibration { return calibrationData(fram) }
