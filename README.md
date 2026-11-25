@@ -261,8 +261,8 @@ Every check below runs LibreTransmitter's own Swift, not a re-implementation of 
   Juggluco's compiled `protocol.c`, the independent check: its whole NFC flow (root slot, authenticated FRAM read and
   decryption, activate, enable streaming), then the BLE login and frames with what NFC gave; the BLE login against
   LibreTransmitter's `Libre2Gen2.swift`; and (`lt-nfc`) LibreTransmitter's own Gen2 NFC pairing, `Libre2Gen2Pairing.pair`,
-  then BLE with what it returned. `lt-nfc` needs a LibreTransmitter with the authenticated pairing (`LT_REV=gen2-nfc-pairing`
-  on the fork until it is merged) and SKIPs otherwise. Root slots 1 and 2. The sources are fetched when it runs. Each
+  then BLE with what it returned. `lt-nfc` needs a LibreTransmitter with the authenticated pairing (the fork's
+  `next-dev+libre2gen2` has it since `bf59b49`) and SKIPs on an older one. Root slots 1 and 2. The sources are fetched when it runs. Each
   client is stopped after `CLIENT_TIMEOUT` seconds, so a client that hangs fails instead of stalling the run.
 - [tools/gen2nfcprobe](tools/gen2nfcprobe/README.md): replays LibreTransmitter's Gen2 NFC pairing against Gen2 mode, with
   its own request bytes and parsers, and reports where it stops.
