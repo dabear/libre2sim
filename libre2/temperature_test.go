@@ -35,7 +35,7 @@ func appAt(s *Sensor, minute int) float64 {
 }
 
 // Without a lag, any skin temperature round-trips: the app gets each reading
-// back, and the records carry the new temperature from the next minute on.
+// back, and the records carry the new temperature from the current minute on.
 func TestTemperatureWithoutLag(t *testing.T) {
 	s, now := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
 	lc := s.state.lifeCount(now)
@@ -44,10 +44,10 @@ func TestTemperatureWithoutLag(t *testing.T) {
 	}
 	s.Tick(now.Add(10 * time.Minute))
 	c := s.state.Calibration
-	if _, rawT, _ := s.state.record(lc); rawT != c.RawTemperature {
-		t.Errorf("the current minute changed temperature: raw %d", rawT)
+	if _, rawT, _ := s.state.record(lc - 1); rawT != c.RawTemperature {
+		t.Errorf("the previous minute changed temperature: raw %d", rawT)
 	}
-	for m := lc + 1; m <= lc+10; m++ {
+	for m := lc; m <= lc+10; m++ {
 		_, rawT, adj := s.state.record(m)
 		if got := c.temperatureFor(rawT, adj); math.Abs(got-27) > 0.05 {
 			t.Errorf("minute %d: %.2f °C", m, got)
@@ -67,15 +67,46 @@ func TestTemperatureWithTissueLag(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Tick(now.Add(60 * time.Minute))
-	first, after5, after40 := appAt(s, lc+1), appAt(s, lc+5), appAt(s, lc+40)
+	first, after5, after40 := appAt(s, lc), appAt(s, lc+5), appAt(s, lc+40)
 	// Colder skin means more correction; the tissue is still warm, so the app
 	// over-reads at first.
 	if first < 110 || !(after5 < first) || math.Abs(after40-100) > 0.5 {
 		t.Errorf("app after the step: %.1f, then %.1f at 5 min, %.1f at 40 min", first, after5, after40)
 	}
 	tissue := s.state.TissueCelsius
-	if !(tissue[lc+1] > 30 && tissue[lc+5] < tissue[lc+1] && math.Abs(tissue[lc+40]-27) < 0.05) {
-		t.Errorf("tissue %.2f, %.2f, %.2f °C", tissue[lc+1], tissue[lc+5], tissue[lc+40])
+	if !(tissue[lc] > 30 && tissue[lc] < tissue[lc-1] && tissue[lc+5] < tissue[lc] && math.Abs(tissue[lc+40]-27) < 0.05) {
+		t.Errorf("tissue %.2f, %.2f, %.2f °C", tissue[lc], tissue[lc+5], tissue[lc+40])
+	}
+}
+
+// Setting the temperature every minute, as a trace replay does, gives each
+// minute's record that minute's temperature, also when the minute was already
+// made, and the same minute's glucose (not the previous minute's).
+func TestTemperatureEveryMinute(t *testing.T) {
+	s, now := readingsSensor(t, 3*time.Hour, time.Hour, GlucoseMode{Kind: "fixed", Value: 100})
+	c := s.state.Calibration
+	s.Tick(now) // the current minute is already made at the old temperature
+	lc0 := s.state.lifeCount(now)
+	for k := 0; k < 10; k++ {
+		at := now.Add(time.Duration(k) * time.Minute)
+		if err := s.SetTemperature(TemperatureMode{Celsius: 25 + float64(k)}, at); err != nil {
+			t.Fatal(err)
+		}
+		s.SetGlucoseMode(GlucoseMode{Kind: "fixed", Value: float64(100 + k)})
+		s.Tick(at)
+	}
+	for k := 0; k < 10; k++ {
+		m := lc0 + k
+		_, rawT, adj := s.state.record(m)
+		if got := c.temperatureFor(rawT, adj); math.Abs(got-(25+float64(k))) > 0.05 {
+			t.Errorf("minute %d: %.2f °C, want %d", m, got, 25+k)
+		}
+		if got := s.state.reading(m); got != uint16(100+k) && k > 0 {
+			t.Errorf("minute %d: glucose %d, want %d", m, got, 100+k)
+		}
+		if got := appAt(s, m); math.Abs(got-float64(s.state.reading(m))) > 0.6 {
+			t.Errorf("minute %d: the app gets %.2f for %d", m, got, s.state.reading(m))
+		}
 	}
 }
 
