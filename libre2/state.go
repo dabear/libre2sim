@@ -219,6 +219,11 @@ func (s *State) macLE() []byte {
 	return b
 }
 
+// BLEAddressHex is the BLE address in uppercase hex without separators.
+func (s *State) BLEAddressHex() string {
+	return strings.ReplaceAll(s.BLEAddress, ":", "")
+}
+
 // AdvertisedName is the BLE name the sensor advertises: by default the BLE
 // address in uppercase hex without separators, or "ABBOTT" + Serial() when
 // Gen2AdvertiseSerial is enabled in Gen2 mode.
@@ -226,7 +231,7 @@ func (s *State) AdvertisedName() string {
 	if s.Gen2 && s.Gen2AdvertiseSerial {
 		return "ABBOTT" + s.Serial()
 	}
-	return strings.ReplaceAll(s.BLEAddress, ":", "")
+	return s.BLEAddressHex()
 }
 
 // Serial is the serial number LibreTransmitter derives from the UID and

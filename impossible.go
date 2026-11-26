@@ -181,7 +181,7 @@ func NewSimRadio(sensor *libre2.Sensor, path string) (*SimRadio, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &SimRadio{sensor: sensor, path: path, listener: l, id: peripheralID(sensor.AdvertisedName()), lastLC: -1,
+	r := &SimRadio{sensor: sensor, path: path, listener: l, id: peripheralID(sensor.BLEAddressHex()), lastLC: -1,
 		unknown: map[string]bool{}}
 	log.Printf("serving the iOS Simulator on %s as peripheral %s", path, r.id)
 	go r.accept()

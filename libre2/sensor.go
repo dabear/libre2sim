@@ -55,11 +55,20 @@ func (s *Sensor) Serial() string {
 	return s.state.Serial()
 }
 
-// AdvertisedName is the BLE address as uppercase hex without separators.
+// AdvertisedName is the BLE name the sensor advertises (uppercase hex MAC, or
+// "ABBOTT" + Serial() when Gen2AdvertiseSerial is enabled in Gen2 mode).
 func (s *Sensor) AdvertisedName() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state.AdvertisedName()
+}
+
+// BLEAddressHex is the sensor's immutable BLE address as uppercase hex without
+// separators, used to derive a stable CoreBluetooth peripheral UUID.
+func (s *Sensor) BLEAddressHex() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.BLEAddressHex()
 }
 
 func (s *Sensor) save() {
