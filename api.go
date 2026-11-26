@@ -167,11 +167,15 @@ func newAPI(sensor *libre2.Sensor) *api {
 		case http.MethodGet:
 		case http.MethodPost:
 			var req struct {
-				StrictUnlock *bool `json:"strictUnlock"`
-				Gen2         *bool `json:"gen2"`
+				StrictUnlock        *bool   `json:"strictUnlock"`
+				Gen2                *bool   `json:"gen2"`
+				Gen2RootSlot        *int    `json:"gen2RootSlot"`
+				Gen2PatchInfo       *string `json:"gen2PatchInfo"`
+				Gen2AdvertiseSerial *bool   `json:"gen2AdvertiseSerial"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.StrictUnlock == nil && req.Gen2 == nil) {
-				writeError(w, http.StatusBadRequest, `want {"strictUnlock":true|false} or {"gen2":true|false}`, 0)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+				(req.StrictUnlock == nil && req.Gen2 == nil && req.Gen2RootSlot == nil && req.Gen2PatchInfo == nil && req.Gen2AdvertiseSerial == nil) {
+				writeError(w, http.StatusBadRequest, `want {"strictUnlock":bool}, {"gen2":bool}, {"gen2RootSlot":1|2}, {"gen2PatchInfo":"hex"}, or {"gen2AdvertiseSerial":bool}`, 0)
 				return
 			}
 			if req.StrictUnlock != nil {
@@ -179,9 +183,23 @@ func newAPI(sensor *libre2.Sensor) *api {
 				log.Printf("strict unlock now %v", *req.StrictUnlock)
 				sensor.Events().Add(libre2.CatSensor, "config", "strict unlock now %v", *req.StrictUnlock)
 			}
-			if req.Gen2 != nil && sensor.SetGen2(*req.Gen2) && a.radio != nil {
-				// Like swapping the sensor's security: the phone's link,
-				// made under the old generation, goes.
+			disconnect := false
+			if req.Gen2 != nil && sensor.SetGen2(*req.Gen2) {
+				disconnect = true
+			}
+			if req.Gen2RootSlot != nil || req.Gen2PatchInfo != nil || req.Gen2AdvertiseSerial != nil {
+				changed, err := sensor.SetGen2Options(req.Gen2RootSlot, req.Gen2PatchInfo, req.Gen2AdvertiseSerial)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, err.Error(), 0)
+					return
+				}
+				if changed {
+					disconnect = true
+				}
+			}
+			if disconnect && a.radio != nil {
+				// Like swapping the sensor's security or identity: drop any
+				// active BLE link so the phone reconnects with the new config.
 				a.radio.Disconnect()
 			}
 		default:
@@ -314,7 +332,7 @@ func newAPI(sensor *libre2.Sensor) *api {
 			Kind string `json:"kind"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Kind == "" {
-			writeError(w, http.StatusBadRequest, `want {"kind":"badcrc"|"short"|"none"}`, 0)
+			writeError(w, http.StatusBadRequest, `want {"kind":"badcrc"|"short"|"dropauth"|"none"}`, 0)
 			return
 		}
 		if err := sensor.ArmFault(req.Kind); err != nil {
@@ -368,7 +386,7 @@ func (a *api) config() map[string]interface{} {
 	st := a.sensor.Status()
 	sensor := map[string]interface{}{}
 	for _, k := range []string{"uid", "serial", "patchInfo", "bleAddress", "advertisedName", "calibration", "temperature",
-		"wearMinutes", "warmupMinutes", "activated", "streamingCode", "gen2"} {
+		"wearMinutes", "warmupMinutes", "activated", "streamingCode", "gen2", "gen2RootSlot", "gen2PatchInfo", "gen2AdvertiseSerial"} {
 		if v, ok := st[k]; ok {
 			sensor[k] = v
 		}

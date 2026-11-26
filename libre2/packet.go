@@ -166,11 +166,13 @@ func (s *Sensor) packetLocked(lc int, badCRC bool) []byte {
 }
 
 // Faults the sensor can be armed with (POST /fault). An armed fault spoils
-// the next packet only and then disarms itself.
+// the next packet (or Gen2 login response for FaultDropAuth) only and then
+// disarms itself.
 const (
-	FaultNone   = "none"
-	FaultBadCRC = "badcrc"
-	FaultShort  = "short"
+	FaultNone     = "none"
+	FaultBadCRC   = "badcrc"
+	FaultShort    = "short"
+	FaultDropAuth = "dropauth"
 )
 
 // shortPacketSize is how much of a packet the "short" fault sends: chunks of
@@ -181,9 +183,9 @@ const shortPacketSize = packetSize - 1
 // disarms it.
 func (s *Sensor) ArmFault(kind string) error {
 	switch kind {
-	case FaultNone, FaultBadCRC, FaultShort:
+	case FaultNone, FaultBadCRC, FaultShort, FaultDropAuth:
 	default:
-		return fmt.Errorf("unknown fault %q; want %q, %q or %q", kind, FaultBadCRC, FaultShort, FaultNone)
+		return fmt.Errorf("unknown fault %q; want %q, %q, %q or %q", kind, FaultBadCRC, FaultShort, FaultDropAuth, FaultNone)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,9 +196,20 @@ func (s *Sensor) ArmFault(kind string) error {
 	if kind == "" {
 		s.events.Add(CatSensor, "fault-disarmed", "fault disarmed")
 	} else {
-		s.events.Add(CatSensor, "fault-armed", "fault %s armed for the next packet", kind)
+		s.events.Add(CatSensor, "fault-armed", "fault %s armed", kind)
 	}
 	return nil
+}
+
+// takeFault atomically disarms and returns true if the armed fault matches kind.
+func (s *Sensor) takeFault(kind string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fault != kind {
+		return false
+	}
+	s.fault = ""
+	return true
 }
 
 // Fault is the fault armed for the next packet, or "".
@@ -219,8 +232,11 @@ func (s *Sensor) Fault() string {
 func (s *Sensor) notifies(lc int) [][]byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fault := s.fault
-	s.fault = ""
+	fault := ""
+	if s.fault == FaultBadCRC || s.fault == FaultShort {
+		fault = s.fault
+		s.fault = ""
+	}
 	if s.state.Gen2 {
 		chunks, err := s.gen2Notifies(lc, fault)
 		if err != nil {

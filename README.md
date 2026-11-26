@@ -112,7 +112,7 @@ are in [tools/cbharness/README.md](tools/cbharness/README.md). The other tools a
 | Warmup, end of wear, early termination | done |
 | Outages (`/disconnect`, `/out-of-range`) | done |
 | Faults for the next packet: bad checksum, short packet | done, unit tested |
-| Gen2 mode (Settings toggle, `POST /config {"gen2":true}`): security generation 2 on NFC and BLE, see [Gen2 mode](#gen2-mode) | done, unit tested; NFC and BLE checked against Juggluco's compiled `protocol.c`, BLE against LibreTransmitter's Gen2 plugin path |
+| Gen2 mode (Settings toggle, `POST /config {"gen2":true}`): security generation 2 on NFC and BLE, see [Gen1 vs Gen2 mode](#gen1-vs-gen2-mode) | done, unit tested; NFC and BLE checked against Juggluco's compiled `protocol.c`, BLE against LibreTransmitter's Gen2 plugin path |
 | iOS Simulator transport (ImpossiBLE), state restoration, suspension | from libre3sim / g7sim |
 | A Raspberry Pi BLE transport | not yet |
 
@@ -133,16 +133,50 @@ does not pin a behaviour down, libre2sim picks one and says so in the code:
 - a changed glucose mode applies to future minutes only, as in libre3sim.
 - one FRAM image per scan, kept for 30 seconds.
 
-## Gen2 mode
+## Gen1 vs Gen2 mode
 
-A toggle on the Settings page (or `POST /config {"gen2":true}`) switches the sensor to security generation 2. It is saved
-in the state file, and a new sensor (`POST /new`) keeps it. Switching either way disables streaming until an app enables it
-again over NFC, and drops a connected phone. With it off, the sensor is the Gen1 sensor above, unchanged.
+`libre2sim` starts in **Gen1** mode by default (EU Libre 2 / 2 Plus, `patchInfo` byte 2 = `0x31`) and can switch to **Gen2** mode (US/CA Libre 2 / 2 Plus, security generation 2) at run time.
+
+### Running Gen1 (default)
+
+```bash
+./start.sh                 # Gen1 sensor, 3 hours old, ready to pair
+```
+
+If the saved state file is currently in Gen2 mode, switch back to Gen1 from the control panel's Settings toggle or via:
+
+```bash
+curl -s -XPOST http://127.0.0.1:8081/config -d '{"gen2":false}'
+```
+
+### Running Gen2 (US/CA Libre 2 / 2 Plus)
+
+Toggle **Gen2** on the control panel's Settings page, or switch over HTTP:
+
+```bash
+# Default Gen2 (patchInfo byte 2 = 0x39, root slot 1, MAC advertised name):
+curl -s -XPOST http://127.0.0.1:8081/config -d '{"gen2":true}'
+
+# US Libre 2 Plus example (patchInfo 2C 0A 3A 02 .., root slot 2, ABBOTT<serial> BLE name):
+curl -s -XPOST http://127.0.0.1:8081/config -d '{
+  "gen2": true,
+  "gen2RootSlot": 2,
+  "gen2PatchInfo": "2c0a3a02",
+  "gen2AdvertiseSerial": true
+}'
+```
+
+Optional Gen2 `POST /config` knobs:
+- `gen2RootSlot`: `1` (default) or `2` (reported by `A1 22` and used for key derivation).
+- `gen2PatchInfo`: 4-byte (8 hex chars, preserving random bytes 4–5) or 6-byte (12 hex chars) `patchInfo` override while Gen2 is on — e.g. `"2c0a3a02"` (US Libre 2 Plus), `"2c0a3a04"` (CA Libre 2 Plus), `"00007402"` (Type 7 Gen2), or `""` to reset to the default `0x39` override.
+- `gen2AdvertiseSerial`: `true` advertises `ABBOTT<serial>` instead of the uppercase hex BLE address.
+
+Gen2 settings are saved in the state file, and a new sensor (`POST /new`) keeps Gen2 mode. Switching generation or changing `gen2RootSlot`/`gen2PatchInfo` disables streaming until an app enables it again over NFC, and drops any connected phone. With Gen2 off, the sensor is the Gen1 sensor above, unchanged.
 
 The Gen2 protocol follows [Juggluco](https://github.com/j-kaltes/Juggluco)'s client (`Gen2.java`, `Libre2GattCallback.java`,
 `libre2_imp/gen2/protocol.c`), the only working open implementation:
 
-- patch info byte 2 is `0x39` (security version 9); the stored patch info is unchanged.
+- patch info byte 2 defaults to `0x39` (security version 9) unless overridden by `gen2PatchInfo`; the stored Gen1 patch info is unchanged.
 - NFC, all custom command `A1`: `22` root slot; `20` a 25-byte challenge; authenticated commands (`cmd` and 15 encrypted
   bytes): `1F` FRAM read (then `A1 21 <block> <count−1>` returns encrypted blocks), `1E` enable streaming (BLE address and
   the provisioning tail), `1B` activate. The Gen1 enable streaming and `readMultipleBlocks` are refused.
@@ -151,7 +185,7 @@ The Gen2 protocol follows [Juggluco](https://github.com/j-kaltes/Juggluco)'s cli
 - the frame plaintext is the Gen1 packet's 44 bytes (records, age, CRC).
 
 Where the references do not pin a behaviour down, libre2sim picks one and marks it "sim's choice" in the code: the stream
-prefix, salt, provisioning tail and NFC epoch are fixed per sensor; root slot 1; zero bytes for the challenge's bytes
+prefix, salt, provisioning tail and NFC epoch are fixed per sensor; root slot 1 by default (configurable `1` or `2`); zero bytes for the challenge's bytes
 11 to 13, the 8-byte NFC reply headers, the root-slot reply's first two bytes and the activate reply; the BLE address
 least significant byte first; one counter for NFC and BLE; a failed login hangs up. None of it has been checked against a
 real Gen2 sensor.
@@ -213,7 +247,7 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | `GET /readings` | `?minutes=60` (or `all`, the whole wear so far) `&step=1` (every Nth minute; above 1 there are no `records` or `aheadRecords`, to keep it small) `&ahead=15` (0 to 60): `{"minute","firstMinute","mgdl":[…],"records":[…],"next":{…},"trend":{…},"ahead":[…],"aheadRecords":[…],"wearEnds","calibration","temperature"}`. The latest readings oldest first (0 is no reading, in warmup), each one's BLE record (`raw`, `appMgdl` the app computes from it, `ble` hex), and the next `ahead` readings (`estimate` and `noiseSD` for the walk model; `wearEnds` if the wear ends first) |
 | `GET /events` | `?since=<seq>`: `{"last":seq,"events":[{"seq","time","cat","kind","msg"}]}`, oldest first. `cat` is `nfc`, `ble` or `sensor`. The latest 200 events are kept in memory, so a restart (`/new`) empties them |
 | `GET /config` | `{"launch":{version, statePath, api, socket, fresh, days, warmupMinutes, ageMinutes, simulator, relaunch, suspend, dylib},"strictUnlock":bool,"sensor":{uid, serial, patchInfo, bleAddress, advertisedName, calibration (i1…i6), temperature, …}}` |
-| `POST /config` | `{"strictUnlock":true}` and/or `{"gen2":true}`: toggle strict unlock or [Gen2 mode](#gen2-mode) at run time; answers like `GET /config` (which also has `gen2`). 400 on anything else |
+| `POST /config` | `{"strictUnlock":bool}`, `{"gen2":bool}`, `{"gen2RootSlot":1\|2}`, `{"gen2PatchInfo":"<8 or 12 hex chars>"}` (`""` resets), and/or `{"gen2AdvertiseSerial":bool}`: configure strict unlock or [Gen1 vs Gen2 mode](#gen1-vs-gen2-mode) at run time; answers like `GET /config`. 400 on anything else |
 | `POST /gen2/test-pairing` | **Test only**, Gen2 mode: `{uid, patchInfo, fram, rootSlot, streamingAuthData, bleAddress}` as a Gen2 NFC pairing would yield them, and Gen2 streaming enabled. 409 with Gen2 off or the sensor not running |
 | `GET /status` | UID, serial, patch info, BLE address and advertised name, `calibration` (`i1`…`i6`, as LibreTransmitter's `CalibrationInfo`), `temperature` (`raw`, `adjustment`, `celsius`: the fixed values every measurement record carries; per measurement in LibreTransmitter, not calibration), FRAM state, life count, wear and warmup minutes, streaming code, unlock count, connected, advertising, glucose mode and the latest reading; `fault` while one is armed. Also `strictUnlock`, `unlocksAccepted`/`unlocksRefused` (since launch), `nextReading` (`{minute, mgdl, warmup, estimate, noiseSD, at, atMs, inSeconds}`) and `trend` (`delta1`, `delta5`, `delta15`: mg/dL against that many minutes earlier) |
 | `POST /glucose` | `{"kind":"fixed"\|"sine"\|"walk","value":n,"amplitude":n,"periodMinutes":n}`, or `{"kind":"trace","trace":"<name>"}` to play a sensor recording (looping; it starts after the warmup if the sensor is still warming up); applies from the next minute. 400 on another kind or an unknown trace |
@@ -225,7 +259,7 @@ curl -s -XPOST localhost:8081/new -d '{"wearDays":15,"warmupMinutes":60,"ageMinu
 | `POST /disconnect` | the sensor drops the link and the app reconnects. 409 if no phone is connected |
 | `POST /out-of-range` | `{"minutes":n}`: drop the link and stay unreachable that long. 400 unless `minutes` > 0 |
 | `POST /terminate` | end the sensor now: FRAM state `05`, no more packets, the link drops |
-| `POST /fault` | `{"kind":"badcrc"}` inverts the next packet's plaintext CRC. LibreTransmitter drops it silently (its `decryptBLE` throws into an empty `catch`). `{"kind":"short"}` sends the next packet as 45 bytes (20 + 20 + 5); LibreTransmitter parses its buffer only at exactly 46 bytes, so the buffer holds stale bytes and **no later packet parses until it reconnects** (verified). `{"kind":"none"}` disarms. One-shot: only the next packet. 400 on another kind |
+| `POST /fault` | `{"kind":"badcrc"}` inverts the next packet's plaintext CRC. LibreTransmitter drops it silently (its `decryptBLE` throws into an empty `catch`). `{"kind":"short"}` sends the next packet as 45 bytes (20 + 20 + 5); LibreTransmitter parses its buffer only at exactly 46 bytes, so the buffer holds stale bytes and **no later packet parses until it reconnects** (verified). `{"kind":"dropauth"}` (Gen2) drops the BLE link after receiving the 19-byte login command before sending the 25-byte session info on F001. `{"kind":"none"}` disarms. One-shot. 400 on another kind |
 | `POST /force-quit` | the app's end is a force-quit, not a termination: drop what it left lodged. 204 |
 | `POST /new` | `{"wearDays":15,"warmupMinutes":60,"ageMinutes":0}`: replace the sensor and restart libre2sim; the new sensor has its own UID, serial and BLE address. `ageMinutes` 0 is a sensor still in its applicator. 400 on bad input |
 | `POST /nfc` | what the Simulator needs in place of the sensor's NFC tag: `{"op":"identifier"}`, `{"op":"systemInfo"}`, `{"op":"readBlocks","first":n,"count":n}`, `{"op":"custom","code":161,"parameters":"<hex>"}`. An NFC error is 422 `{"error":…,"code":n}` |

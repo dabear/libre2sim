@@ -302,6 +302,13 @@ func (s *Sensor) Status() map[string]interface{} {
 	if st.Terminated != nil {
 		out["terminated"] = st.Terminated
 	}
+	if st.Gen2 {
+		out["gen2RootSlot"] = st.Gen2RootSlot
+		if st.Gen2PatchInfo != "" {
+			out["gen2PatchInfo"] = st.Gen2PatchInfo
+		}
+		out["gen2AdvertiseSerial"] = st.Gen2AdvertiseSerial
+	}
 	return out
 }
 

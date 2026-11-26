@@ -245,6 +245,12 @@ func (h *handler) writeGen2(b []byte, now time.Time) {
 			refuse(err)
 			return
 		}
+		if h.s.takeFault(FaultDropAuth) {
+			log.Printf("%s Gen2 login accepted, dropping link (fault %s)", h.link.Addr(), FaultDropAuth)
+			h.s.events.Add(CatSensor, "fault-fired", "fault %s dropped the Gen2 link before session info", FaultDropAuth)
+			h.hangUp("fault dropauth")
+			return
+		}
 		for _, chunk := range [][]byte{resp[:7], resp[7:]} {
 			if err := h.link.Notify(CharWrite, chunk); err != nil {
 				log.Printf("%s Gen2 login response: %v", h.link.Addr(), err)

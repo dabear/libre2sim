@@ -524,3 +524,58 @@ func TestGen2CRCOddPadding(t *testing.T) {
 		t.Fatalf("CRC bytes %x, want 0152 (l2g2_crc16 = 0x5201, little-endian)", b[3:])
 	}
 }
+
+func TestGen2USOptionsAndDropAuth(t *testing.T) {
+	s, st := gen2Sensor(t)
+	origMAC := st.macLE()
+
+	slot := 2
+	patch := "2c0a3a02"
+	advSerial := true
+	changed, err := s.SetGen2Options(&slot, &patch, &advSerial)
+	if err != nil || !changed {
+		t.Fatalf("SetGen2Options: changed=%v err=%v", changed, err)
+	}
+	if !bytes.Equal(st.macLE(), origMAC) {
+		t.Fatalf("macLE changed when advertising serial: got %x want %x", st.macLE(), origMAC)
+	}
+	pi, err := s.NFCCustom(cmdA1, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(pi[:4]) != "2c0a3a02" {
+		t.Fatalf("patchInfo prefix %x, want 2c0a3a02", pi[:4])
+	}
+	if got := s.AdvertisedName(); got != "ABBOTT"+st.Serial() {
+		t.Fatalf("AdvertisedName %q, want ABBOTT%s", got, st.Serial())
+	}
+
+	host := newGen2Host(t, s, st)
+	host.readSlot()
+	if host.slot != 2 {
+		t.Fatalf("readSlot got %d, want 2", host.slot)
+	}
+	_, prov := host.enableStreaming()
+
+	if err := s.ArmFault(FaultDropAuth); err != nil {
+		t.Fatal(err)
+	}
+	link, h := newGen2Rig(t, s)
+	link.subscribe(h, CharWrite)
+	h.Write(CharWrite, []byte{0x20})
+	ch := link.await(t, CharWrite, 1)[0]
+
+	counter := binary.LittleEndian.Uint32(ch[7:])
+	pt := append(append(append(append([]byte(nil), host.hostRandom...), ^byte(0x1f)), prov[7:10]...), ch[:7]...)
+	rk := newSpeckKey(host.sensorKey[:])
+	cryptCTR(&rk, authNonce(prov.salt(), counter, TransportBLE, 0), pt)
+	h.Write(CharWrite, append([]byte{0x1f}, pt...))
+
+	link.await(t, CharWrite, -1)
+	if s.Fault() != "" {
+		t.Fatalf("FaultDropAuth still armed after firing: %q", s.Fault())
+	}
+	if len(link.got[CharWrite]) != 1 {
+		t.Fatalf("expected drop before session info, got %d notifies on F001", len(link.got[CharWrite]))
+	}
+}

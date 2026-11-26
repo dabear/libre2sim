@@ -93,6 +93,13 @@ type State struct {
 	Gen2 bool `json:"gen2,omitempty"`
 	// Gen2RootSlot is the root slot A1 22 reports (1 or 2).
 	Gen2RootSlot int `json:"gen2RootSlot,omitempty"`
+	// Gen2PatchInfo optionally overrides patchInfo while Gen2 mode is on:
+	// either 4 bytes (8 hex chars, preserving bytes 4..5) or 6 bytes (12 hex
+	// chars). Empty uses the default 0x39 override on byte 2.
+	Gen2PatchInfo string `json:"gen2PatchInfo,omitempty"`
+	// Gen2AdvertiseSerial makes AdvertisedName return "ABBOTT" + Serial()
+	// instead of the hex BLE address while Gen2 mode is on.
+	Gen2AdvertiseSerial bool `json:"gen2AdvertiseSerial,omitempty"`
 	// Gen2Stream is the sensor's fixed Gen2 stream parameters, hex:
 	// streamPrefix(4) ‖ salt(3) ‖ provisioning tail(3) ‖ NFC epoch(2).
 	Gen2Stream string `json:"gen2Stream,omitempty"`
@@ -205,17 +212,22 @@ func (s *State) patchInfo() []byte { return s.effectivePatchInfo() }
 // macLE is the BLE address least significant byte first, as the
 // enable-streaming command returns it.
 func (s *State) macLE() []byte {
-	b := hexBytes(s.AdvertisedName())
+	b := hexBytes(strings.ReplaceAll(s.BLEAddress, ":", ""))
 	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
 		b[i], b[j] = b[j], b[i]
 	}
 	return b
 }
 
-// AdvertisedName is the BLE address in uppercase hex without separators:
-// what LibreTransmitter makes of the enable-streaming reply, and the name it
-// looks for when it scans.
-func (s *State) AdvertisedName() string { return strings.ReplaceAll(s.BLEAddress, ":", "") }
+// AdvertisedName is the BLE name the sensor advertises: by default the BLE
+// address in uppercase hex without separators, or "ABBOTT" + Serial() when
+// Gen2AdvertiseSerial is enabled in Gen2 mode.
+func (s *State) AdvertisedName() string {
+	if s.Gen2 && s.Gen2AdvertiseSerial {
+		return "ABBOTT" + s.Serial()
+	}
+	return strings.ReplaceAll(s.BLEAddress, ":", "")
+}
 
 // Serial is the serial number LibreTransmitter derives from the UID and
 // patch info.

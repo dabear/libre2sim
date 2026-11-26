@@ -34,12 +34,24 @@ const gen2StreamSize = 12
 const gen2DefaultRootSlot = 1
 
 // effectivePatchInfo is the patch info the sensor reports: the stored one,
-// with the Gen2 security version while Gen2 mode is on.
+// with the Gen2 security version (or Gen2PatchInfo override) while Gen2 mode is on.
 func (s *State) effectivePatchInfo() []byte {
 	p := hexBytes(s.PatchInfo)
-	if s.Gen2 && len(p) > 2 {
-		p[2] = gen2PatchInfo2
+	if !s.Gen2 || len(p) < 6 {
+		return p
 	}
+	if s.Gen2PatchInfo != "" {
+		if custom, err := hex.DecodeString(s.Gen2PatchInfo); err == nil {
+			switch len(custom) {
+			case 6:
+				return custom
+			case 4:
+				copy(p[:4], custom)
+				return p
+			}
+		}
+	}
+	p[2] = gen2PatchInfo2
 	return p
 }
 
@@ -78,6 +90,56 @@ func (s *Sensor) SetGen2(on bool) bool {
 	s.events.Add(CatSensor, "generation", "sensor is now %s (patch info %x); streaming disabled until enabled again over NFC",
 		gen, st.effectivePatchInfo())
 	return true
+}
+
+// SetGen2Options updates optional Gen2 identity/advertising settings:
+// rootSlot (1 or 2), patchInfo ("" to reset, or 4-byte / 6-byte hex), and
+// advertiseSerial (advertise "ABBOTT<serial>" instead of MAC hex).
+// Returns whether any setting changed (and disables Gen2 streaming if rootSlot
+// or patchInfo changed).
+func (s *Sensor) SetGen2Options(rootSlot *int, patchInfo *string, advertiseSerial *bool) (bool, error) {
+	if rootSlot != nil && *rootSlot != 1 && *rootSlot != 2 {
+		return false, fmt.Errorf("gen2RootSlot %d: want 1 or 2", *rootSlot)
+	}
+	var normalizedPatch string
+	if patchInfo != nil && *patchInfo != "" {
+		b, err := hex.DecodeString(*patchInfo)
+		if err != nil || (len(b) != 4 && len(b) != 6) {
+			return false, fmt.Errorf("gen2PatchInfo %q: want 4 or 6 bytes of hex (or empty)", *patchInfo)
+		}
+		normalizedPatch = hex.EncodeToString(b)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.state
+	changed := false
+	rekey := false
+	if rootSlot != nil && st.Gen2RootSlot != *rootSlot {
+		st.Gen2RootSlot = *rootSlot
+		changed = true
+		rekey = true
+	}
+	if patchInfo != nil && st.Gen2PatchInfo != normalizedPatch {
+		st.Gen2PatchInfo = normalizedPatch
+		changed = true
+		rekey = true
+	}
+	if advertiseSerial != nil && st.Gen2AdvertiseSerial != *advertiseSerial {
+		st.Gen2AdvertiseSerial = *advertiseSerial
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	if rekey {
+		st.Gen2StreamingEnabled = false
+		s.gen2 = nil
+		s.gen2FRAM = nil
+	}
+	s.changed()
+	log.Printf("Gen2 config updated: rootSlot=%d patchInfo=%x advertisedName=%s", st.Gen2RootSlot, st.effectivePatchInfo(), st.AdvertisedName())
+	s.events.Add(CatSensor, "config", "Gen2 config updated: rootSlot=%d patchInfo=%x advertisedName=%s", st.Gen2RootSlot, st.effectivePatchInfo(), st.AdvertisedName())
+	return true, nil
 }
 
 // SetGen2 switches a state's generation, disabling streaming. For a sensor
