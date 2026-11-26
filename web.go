@@ -220,9 +220,9 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
         <button class="btn" onclick="post('/out-of-range', {minutes: +val('outMinutes')})">Go out of range</button></div>
       <p class="note">Dropping the link lets the app reconnect at once. Out of range hangs up and stays silent that long.</p></div>
     <div class="card"><h2>Faults</h2>
-      <div class="row"><label class="field">next packet <select id="fault" style="width:auto"><option value="badcrc">badcrc: checksum error</option><option value="short">short: 45 bytes</option><option value="none">none: disarm</option></select></label>
+      <div class="row"><label class="field">next packet / login <select id="fault" style="width:auto"><option value="badcrc">badcrc: checksum error</option><option value="short">short: 45 bytes</option><option value="dropauth">dropauth: drop Gen2 login before session info</option><option value="none">none: disarm</option></select></label>
         <button class="btn" onclick="post('/fault', {kind: val('fault')})">Arm</button></div>
-      <p class="note">One-shot: only the next packet is spoiled. LibreTransmitter parses only at exactly 46 bytes, so a short packet leaves its buffer stale until it reconnects.</p></div>
+      <p class="note">One-shot: only the next packet (or Gen2 login for dropauth) is spoiled. LibreTransmitter parses only at exactly 46 bytes, so a short packet leaves its buffer stale until it reconnects.</p></div>
     <div class="card"><h2>Sensor life</h2>
       <div class="row"><button class="btn" onclick="post('/activate')">Activate</button>
         <button class="btn" id="endWarmup" onclick="post('/end-warmup')">End warmup now</button>
@@ -247,7 +247,16 @@ svg.chart { width: 100%; height: 180px; display: block; margin-top: 8px; }
   <div class="card"><h2>Live settings</h2>
     <label class="toggle"><input type="checkbox" id="strict" onchange="post('/config', {strictUnlock: this.checked}).then(loadConfig)"> Strict unlock: refuse replayed unlock counts</label>
     <label class="toggle"><input type="checkbox" id="gen2" onchange="post('/config', {gen2: this.checked}).then(loadConfig)"> Gen2: security generation 2 (authenticated NFC, BLE login with a challenge)</label>
-    <p class="note">The settings that can change while libre2sim runs. Switching Gen2 disables streaming until an app enables it
+    <div id="gen2Opts" style="display:none;margin-top:12px;padding-left:24px;border-left:2px solid var(--line)">
+      <div class="row">
+        <label class="field">root slot <select id="gen2RootSlot" style="width:auto" onchange="post('/config', {gen2RootSlot: +this.value}).then(loadConfig)"><option value="1">1 (default)</option><option value="2">2</option></select></label>
+        <label class="field">patch info <select id="gen2PatchProfile" style="width:auto" onchange="onGen2PatchProfile()"><option value="">Default (0x39)</option><option value="2c0a3a02">US Libre 2 Plus (2c0a3a02)</option><option value="2c0a3a04">CA Libre 2 Plus (2c0a3a04)</option><option value="00007402">Type 7 Gen2 (00007402)</option><option value="custom">Custom hex…</option></select></label>
+        <label class="field" id="gen2PatchHexWrap" style="display:none">hex <input type="text" id="gen2PatchInfo" placeholder="8 or 12 hex" style="width:130px"></label>
+        <button class="btn" id="gen2PatchApply" style="display:none" onclick="post('/config', {gen2PatchInfo: val('gen2PatchInfo').trim()}).then(loadConfig)">Apply</button>
+      </div>
+      <label class="toggle" style="margin-top:8px"><input type="checkbox" id="gen2AdvertiseSerial" onchange="post('/config', {gen2AdvertiseSerial: this.checked}).then(loadConfig)"> Advertise ABBOTT&lt;serial&gt; instead of BLE MAC address</label>
+    </div>
+    <p class="note">The settings that can change while libre2sim runs. Switching Gen2 or changing root slot / patch info disables streaming until an app enables it
       again over NFC, and drops a connected phone. A new sensor keeps the generation.</p></div>
   <div class="grid g2" style="margin-top:20px">
     <div class="card"><h2>Launch (read-only)</h2><dl id="launch"></dl>
@@ -712,11 +721,39 @@ async function pollEvents() {
   lastSeq = r.last;
 }
 
+const gen2PatchPresets = new Set(['', '2c0a3a02', '2c0a3a04', '00007402']);
+
+function onGen2PatchProfile() {
+  const p = val('gen2PatchProfile');
+  const custom = p === 'custom';
+  el('gen2PatchHexWrap').style.display = custom ? '' : 'none';
+  el('gen2PatchApply').style.display = custom ? '' : 'none';
+  if (!custom) {
+    post('/config', {gen2PatchInfo: p}).then(loadConfig);
+  }
+}
+
 async function loadConfig() {
   try {
     const c = await (await fetch('/config')).json();
     el('strict').checked = c.strictUnlock;
     el('gen2').checked = c.gen2;
+    el('gen2Opts').style.display = c.gen2 ? '' : 'none';
+    if (c.gen2 && c.sensor) {
+      el('gen2RootSlot').value = String(c.sensor.gen2RootSlot || 1);
+      el('gen2AdvertiseSerial').checked = !!c.sensor.gen2AdvertiseSerial;
+      const pi = (c.sensor.gen2PatchInfo || '').toLowerCase();
+      if (gen2PatchPresets.has(pi)) {
+        el('gen2PatchProfile').value = pi;
+        el('gen2PatchHexWrap').style.display = 'none';
+        el('gen2PatchApply').style.display = 'none';
+      } else {
+        el('gen2PatchProfile').value = 'custom';
+        el('gen2PatchInfo').value = pi;
+        el('gen2PatchHexWrap').style.display = '';
+        el('gen2PatchApply').style.display = '';
+      }
+    }
     fill(el('launch'), c.launch);
     fill(el('identity'), c.sensor);
   } catch (e) {}
