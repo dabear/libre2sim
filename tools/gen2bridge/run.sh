@@ -82,6 +82,8 @@ for c in $CLIENTS; do
 		fi
 		{ echo 'import Foundation'
 		  awk '/^struct Libre2Gen2PairingResult/{on=1} /^extension Libre2Gen2PairingResult/{on=0} on' "$src/SensorPairingService+Gen2.swift"
+		  echo '// Stub: the pairing errors it throws live in SensorPairingService.swift, which needs CoreNFC.'
+		  echo 'enum PairingError: Error { case gen2CredentialsUnavailable, decryptionError }'
 		  echo '// Stub: run.sh checks the FRAM byte for byte against the sim instead.'
 		  echo 'struct SensorData { let hasValidCRCs = true; init?(bytes: [UInt8]) { guard bytes.count == 344 else { return nil } } }'
 		} >"$b/pairing.swift"
